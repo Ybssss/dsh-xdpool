@@ -47,15 +47,15 @@ interface TaskEventChain {
  * (the QQ-specific one), because this is a QQ-hosted app. Measured 0/1 → 1/1 on
  * both from a single chain.
  */
-export declare const BUDDY_APP_ID = "cb_y5Dy46tPQGGWtueMxXbe";
-export declare const BUDDY_APP_NAME = "企鹅教师助手";
+declare const BUDDY_APP_ID = "cb_y5Dy46tPQGGWtueMxXbe";
+declare const BUDDY_APP_NAME = "企鹅教师助手";
 /**
  * The buddy-app chain (two tasks).
  *
  * Five clicks in the order a user would make them: discover the app, see it,
  * enter it, confirm the account link, skip the second binding step.
  */
-export declare function buddyAppChain(): TaskEventChain;
+declare function buddyAppChain(): TaskEventChain;
 /**
  * The design-canvas chain (`create_canvas`, +300 — the joint largest reward).
  *
@@ -63,20 +63,20 @@ export declare function buddyAppChain(): TaskEventChain;
  * real canvas is ever created; the chat chain in front supplies the ids they
  * reference. Measured 1/1 on three accounts.
  */
-export declare function canvasChain(): TaskEventChain;
+declare function canvasChain(): TaskEventChain;
 /**
  * The scheduled-task event (`automation_1`).
  *
  * One event is the whole chain — measured 1/1 on two accounts. The name is only
  * for the server's own records, so a generated one is fine.
  */
-export declare function automationChain(): TaskEventChain;
+declare function automationChain(): TaskEventChain;
 /**
  * The plain chat chain (`RichMeow_Chat`, and the base of the template chain).
  *
  * Measured: this chain alone lights `RichMeow_Chat`.
  */
-export declare function chatChain(): TaskEventChain;
+declare function chatChain(): TaskEventChain;
 /**
  * The "same as this case" chain (`playbook_prompt`).
  *
@@ -84,17 +84,17 @@ export declare function chatChain(): TaskEventChain;
  * inspiration case pre-fills — not the card impression or the button click, so
  * the whole click path is replayed for realism but the send is what counts.
  */
-export declare function playbookChain(caseId?: string, caseName?: string): TaskEventChain;
+declare function playbookChain(caseId?: string, caseName?: string): TaskEventChain;
 /** The inspiration case the reference panel sends a prompt for. */
-export declare const PLAYBOOK_CASE_ID = "pm-gtm-launch-plan";
-export declare const PLAYBOOK_CASE_NAME = "新产品上市 GTM 发布计划一页纸";
+declare const PLAYBOOK_CASE_ID = "pm-gtm-launch-plan";
+declare const PLAYBOOK_CASE_NAME = "新产品上市 GTM 发布计划一页纸";
 /**
  * The five templates the reference panel cycles through, as `[id, name]`.
  *
  * The upstream does not check that these templates exist — only that five
  * distinct `template_used` events arrive — so they are the reference set.
  */
-export declare const TEMPLATE_PRESETS: readonly (readonly [string, string])[];
+declare const TEMPLATE_PRESETS: readonly (readonly [string, string])[];
 /**
  * One "created a task from a template" chain (`template_5`, +100 for five).
  *
@@ -102,9 +102,9 @@ export declare const TEMPLATE_PRESETS: readonly (readonly [string, string])[];
  * on) plus `agent_task_created_with_template` and `template_used`. Measured:
  * five groups in one report scored 5/5.
  */
-export declare function templateChain(templateId: string, templateName: string): TaskEventChain;
+declare function templateChain(templateId: string, templateName: string): TaskEventChain;
 /** Every template group, ready to send in order. */
-export declare function templateChains(): readonly TaskEventChain[];
+declare function templateChains(): readonly TaskEventChain[];
 /**
  * The library-introduction click (`Library_read`).
  *
@@ -112,16 +112,16 @@ export declare function templateChains(): readonly TaskEventChain[];
  * fingerprint scores nothing — so this chain returns a web transport and the
  * scheduler routes it through `reportWebEvent`.
  */
-export declare function libraryReadChain(): TaskEventChain;
+declare function libraryReadChain(): TaskEventChain;
 /** The document the library click is reported against. */
-export declare const LIBRARY_DOC_URL = "https://www.workbuddy.cn/space/d/o0KWYeynteVv06UnAZqIFm";
+declare const LIBRARY_DOC_URL = "https://www.workbuddy.cn/space/d/o0KWYeynteVv06UnAZqIFm";
 /** The theme key `Hp_Appearance` is scored on (和平精英激战金秋). */
-export declare const APPEARANCE_THEME_KEY = "theme-tkmw7j";
+declare const APPEARANCE_THEME_KEY = "theme-tkmw7j";
 /** The skill `skill_1` is scored on. */
-export declare const SKILL_ID = "skill_2097350077599879168";
-export declare const SKILL_NAME = "润泽小馆·日报撰写";
+declare const SKILL_ID = "skill_2097350077599879168";
+declare const SKILL_NAME = "润泽小馆·日报撰写";
 /** The 腾讯轻量云 expert `Expert_lighthouse` is scored on. */
-export declare const LIGHTHOUSE_EXPERT_ID = "ex_2cvvUZQhDyeJ";
+declare const LIGHTHOUSE_EXPERT_ID = "ex_2cvvUZQhDyeJ";
 /**
  * Build the `skill_1` chain from a REAL conversation.
  *
@@ -129,9 +129,9 @@ export declare const LIGHTHOUSE_EXPERT_ID = "ex_2cvvUZQhDyeJ";
  * conversation it names, so the caller must first open a real chat and hand the
  * server-side ids in.
  */
-export declare function skillChain(conversationId: string, requestId: string): TaskEventChain;
+declare function skillChain(conversationId: string, requestId: string): TaskEventChain;
 /** The theme-apply event `Hp_Appearance` is scored on. */
-export declare function appearanceChain(themeKey?: string): TaskEventChain;
+declare function appearanceChain(themeKey?: string): TaskEventChain;
 /** One expert from the platform's marketplace, as the summon chains need it. */
 interface MarketExpert {
   expertId: string;
@@ -146,7 +146,7 @@ interface MarketExpert {
  *
  * Paid before the conversation, in the order the app emits them.
  */
-export declare function expertSummonEvents(expert: MarketExpert): Record<string, unknown>[];
+declare function expertSummonEvents(expert: MarketExpert): Record<string, unknown>[];
 /** `mode` for the `expert_actual_use` payload; the scorer checks it. */
 type ExpertUseMode = 'craft' | 'LOCAL';
 /**
@@ -155,14 +155,14 @@ type ExpertUseMode = 'craft' | 'LOCAL';
  * The `requestId` must be the SERVER's id for a real chat: a made-up one scores
  * nothing, because the scorer looks the conversation up.
  */
-export declare function expertActualUseEvent(expert: MarketExpert, conversationId: string, requestId: string, mode?: ExpertUseMode): Record<string, unknown>;
+declare function expertActualUseEvent(expert: MarketExpert, conversationId: string, requestId: string, mode?: ExpertUseMode): Record<string, unknown>;
 /**
  * The chat chain for an expert conversation.
  *
  * `agent_task_created` carries the expert fields the scorer reads to attribute
  * the conversation to that expert.
  */
-export declare function expertChatEvents(expert: MarketExpert, conversationId: string, requestId: string): Record<string, unknown>[];
+declare function expertChatEvents(expert: MarketExpert, conversationId: string, requestId: string): Record<string, unknown>[];
 //#endregion
 //#region src/context-budget.d.ts
 /**
@@ -327,13 +327,13 @@ type WorkBuddyRegion = 'cn' | 'global';
  * Body markers win over status, because the upstream reuses 400/200 for
  * several distinct conditions.
  */
-export declare function classifyUpstreamError(status: number, body: string): UpstreamErrorKind;
+declare function classifyUpstreamError(status: number, body: string): UpstreamErrorKind;
 /**
  * Parse the reset time the upstream reports for a rate limit, when present.
  * Recognises an epoch-millisecond field and the Chinese-localised sentence
  * form, so the pool can resume exactly when the window reopens.
  */
-export declare function parseRateLimitReset(body: string): number | undefined;
+declare function parseRateLimitReset(body: string): number | undefined;
 /** One growth-centre task, flattened from the upstream's loosely-shaped entry. */
 /** One streak tier and what redeeming it pays. */
 interface WorkBuddyStreakTier {
@@ -431,7 +431,7 @@ interface WorkBuddyTask {
  *
  * Measured: this chain alone lights up `RichMeow_Chat`.
  */
-export declare function desktopChatEvents(conversationId: string, requestId: string, messageId: string, modelId?: string, modelName?: string): Record<string, unknown>[];
+declare function desktopChatEvents(conversationId: string, requestId: string, messageId: string, modelId?: string, modelName?: string): Record<string, unknown>[];
 /**
  * A chat chain plus the two canvas events that score `create_canvas`.
  *
@@ -440,15 +440,15 @@ export declare function desktopChatEvents(conversationId: string, requestId: str
  *
  * Measured: three accounts scored 1/1 from this sequence.
  */
-export declare function desktopCanvasEvents(conversationId: string, requestId: string): Record<string, unknown>[];
+declare function desktopCanvasEvents(conversationId: string, requestId: string): Record<string, unknown>[];
 /**
  * The single event that scores `automation_1` (a scheduled task was created).
  *
  * Measured: two accounts lit it with this event alone.
  */
-export declare function desktopAutomationCreatedEvent(name: string): Record<string, unknown>;
-export declare function buddyAppEvents(buddyId: string, buddyName: string): Record<string, unknown>[];
-export declare class WorkBuddyUpstreamClient {
+declare function desktopAutomationCreatedEvent(name: string): Record<string, unknown>;
+declare function buddyAppEvents(buddyId: string, buddyName: string): Record<string, unknown>[];
+declare class WorkBuddyUpstreamClient {
   private readonly fetchImpl;
   private readonly clientVersion;
   /** Backoff ladder for `fetchModels`; empty means a single attempt. */
@@ -488,10 +488,21 @@ export declare class WorkBuddyUpstreamClient {
    * endpoint itself always streams, so this reassembles the SSE frames into a
    * single string. Throws on any failure: the compactor then falls back to
    * plain truncation rather than failing the user's turn.
+   *
+   * `conversationKey` identifies the conversation this completion belongs to.
+   * Compaction is part of the same conversation as the request that triggered
+   * it, so the caller passes the same key the retry will use — the gateway
+   * refuses a chat completion that carries no conversation id.
    */
-  completeChat(credential: WorkBuddyCredential, prepared: string, signal?: AbortSignal): Promise<string>;
-  /** Forward one chat completion. Never throws for upstream failures. */
-  chatStream(credential: WorkBuddyCredential, prepared: string, signal?: AbortSignal): Promise<ChatStreamResult>;
+  completeChat(credential: WorkBuddyCredential, prepared: string, signal?: AbortSignal, conversationKey?: string): Promise<string>;
+  /**
+   * Forward one chat completion. Never throws for upstream failures.
+   *
+   * `conversationKey` is the pool's stable id for this conversation
+   * (`conversationKeyOf` in the shim); it is optional so a caller without one
+   * still sends a well-formed conversation identity rather than none at all.
+   */
+  chatStream(credential: WorkBuddyCredential, prepared: string, signal?: AbortSignal, conversationKey?: string): Promise<ChatStreamResult>;
   /** POST the token-refresh endpoint; the caller merges the outcome. */
   refreshToken(credential: WorkBuddyCredential): Promise<WorkBuddyRefreshOutcome>;
   /**
@@ -786,10 +797,10 @@ interface TokenRefresher {
   }>;
 }
 /** Live auth file name the WorkBuddy desktop app writes. */
-export declare const WORKBUDDY_LIVE_FILENAME = "workbuddy-desktop.info";
+declare const WORKBUDDY_LIVE_FILENAME = "workbuddy-desktop.info";
 /** Snapshot files left behind by previous logins share this prefix. */
 /** Env override for the auth file or its directory. */
-export declare const WORKBUDDY_AUTH_FILE_ENV = "WORKBUDDY_AUTH_FILE";
+declare const WORKBUDDY_AUTH_FILE_ENV = "WORKBUDDY_AUTH_FILE";
 /** One parsed WorkBuddy credential. */
 /**
  * A credential file the pool could not turn into an account.
@@ -869,7 +880,7 @@ interface WorkBuddyAccount {
  * Windows probes Local before Roaming; a redirected profile still resolves
  * through the env location.
  */
-export declare function defaultDesktopAuthDirs(platform?: NodeJS.Platform, home?: string, env?: NodeJS.ProcessEnv): string[];
+declare function defaultDesktopAuthDirs(platform?: NodeJS.Platform, home?: string, env?: NodeJS.ProcessEnv): string[];
 /**
  * Parse a WorkBuddy auth document. Accepts the nested desktop shape
  * `{"auth":{...},"account":{...}}` and the flat panel shape; returns undefined
@@ -879,10 +890,10 @@ export declare function defaultDesktopAuthDirs(platform?: NodeJS.Platform, home?
  * platforms). Absent means "plain-string builds only", which is what every
  * caller without an at-rest key should pass.
  */
-export declare function parseWorkBuddyAuth(text: string, sourcePath: string, decrypt?: (field: unknown) => string): WorkBuddyCredential | undefined;
-export declare function workbuddyAccountId(credential: Pick<WorkBuddyCredential, 'uin' | 'uid' | 'nickname'>): string;
+declare function parseWorkBuddyAuth(text: string, sourcePath: string, decrypt?: (field: unknown) => string): WorkBuddyCredential | undefined;
+declare function workbuddyAccountId(credential: Pick<WorkBuddyCredential, 'uin' | 'uid' | 'nickname'>): string;
 /** Every directory the pool should scan, in probe order. */
-export declare function candidateAuthDirs(env?: NodeJS.ProcessEnv): string[];
+declare function candidateAuthDirs(env?: NodeJS.ProcessEnv): string[];
 /** How the pool chooses which account serves the next request. */
 type AccountDistribution = 'priority' | 'round-robin' | 'balanced' | 'sticky' | 'expiry';
 interface AccountPoolOptions {
@@ -941,7 +952,7 @@ interface AccountPoolOptions {
    */
   persistent?: boolean;
 }
-export declare class WorkBuddyAccountPool {
+declare class WorkBuddyAccountPool {
   private readonly logger;
   private authDirs;
   private cooldownMs;
@@ -1393,26 +1404,26 @@ export declare class WorkBuddyAccountPool {
  * @module dsh-xdpool/status-paths
  */
 /** Plugin-owned read-only pool status endpoint (account rows + models + shim). */
-export declare const POOL_STATUS_PATH = "/plugins/dsh-xdpool/status";
+declare const POOL_STATUS_PATH = "/plugins/dsh-xdpool/status";
 /** Plugin-owned local account rescan endpoint (re-read desktop snapshots). */
-export declare const POOL_RESCAN_PATH = "/plugins/dsh-xdpool/accounts/rescan";
+declare const POOL_RESCAN_PATH = "/plugins/dsh-xdpool/accounts/rescan";
 /** Plugin-owned cooldown reset endpoint (clear all 429 cooldowns). */
-export declare const POOL_RESET_COOLDOWN_PATH = "/plugins/dsh-xdpool/cooldowns/reset";
+declare const POOL_RESET_COOLDOWN_PATH = "/plugins/dsh-xdpool/cooldowns/reset";
 /** Plugin-owned daily check-in action endpoint (claim today's reward). */
-export declare const POOL_CHECKIN_PATH = "/plugins/dsh-xdpool/checkin";
+declare const POOL_CHECKIN_PATH = "/plugins/dsh-xdpool/checkin";
 /** Plugin-owned model-selection save endpoint (writes the settings section). */
-export declare const POOL_MODELS_SAVE_PATH = "/plugins/dsh-xdpool/models/save";
+declare const POOL_MODELS_SAVE_PATH = "/plugins/dsh-xdpool/models/save";
 /**
  * Throw one account out of the pool for good, or take it back.
  *
  * Separate from the disable route because the semantics differ: disabling is a
  * rotation preference the account survives, ignoring survives the account.
  */
-export declare const POOL_ACCOUNT_IGNORE_PATH = "/plugins/dsh-xdpool/accounts/ignored";
+declare const POOL_ACCOUNT_IGNORE_PATH = "/plugins/dsh-xdpool/accounts/ignored";
 /** Run one automation job immediately, so the card can verify it on demand. */
-export declare const POOL_AUTOMATION_RUN_PATH = "/plugins/dsh-xdpool/automation/run";
+declare const POOL_AUTOMATION_RUN_PATH = "/plugins/dsh-xdpool/automation/run";
 /** Set or clear one account's reserved-credit floor. */
-export declare const POOL_CREDIT_RESERVE_PATH = "/plugins/dsh-xdpool/accounts/credit-reserve";
+declare const POOL_CREDIT_RESERVE_PATH = "/plugins/dsh-xdpool/accounts/credit-reserve";
 /**
  * One model's facts, exactly as the host's catalogue spells them.
  *
@@ -2150,7 +2161,7 @@ type PoolDistribution = 'priority' | 'round-robin' | 'balanced' | 'sticky' | 'ex
  * copies would drift, and the drift is invisible — the card would write a
  * schedule the scheduler does not run.
  */
-export declare const DEFAULT_AUTOMATION_HOURS: {
+declare const DEFAULT_AUTOMATION_HOURS: {
   readonly checkin: readonly [9];
   readonly report: readonly [10];
   readonly tasks: readonly [11];
@@ -2194,11 +2205,11 @@ interface WorkBuddyModelInfo {
  * `multiplier: 0` is the gateways' own spelling of "free" (`credits: "x0.00"`),
  * which is what turns on the free badge.
  */
-export declare const FALLBACK_WORKBUDDY_MODELS: readonly WorkBuddyModelInfo[];
+declare const FALLBACK_WORKBUDDY_MODELS: readonly WorkBuddyModelInfo[];
 /** Which gateway a catalog describes. Mirrors `WorkBuddyRegion` in `upstream.ts`. */
 type CatalogRegion = 'cn' | 'global';
 /** Live catalog with a static fallback behind it. */
-export declare class WorkBuddyCatalog {
+declare class WorkBuddyCatalog {
   /**
    * Which gateway this catalog serves, and therefore which static table it falls
    * back to.
@@ -2762,7 +2773,7 @@ interface WorkBuddyShimOptions {
    */
   extra?: ExtraLaneOptions;
 }
-export declare function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShim;
+declare function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShim;
 //#endregion
 //#region src/free-messages.d.ts
 /**
@@ -2819,7 +2830,7 @@ interface FreeModelRow {
 //#region src/adapter.d.ts
 /** Provider route this bundle owns. */
 /** Provider route this bundle owns for the domestic (CN) gateway. */
-export declare const XDPOOL_PROVIDER = "xdpool";
+declare const XDPOOL_PROVIDER = "xdpool";
 interface WorkBuddyAdapterOptions {
   shim: WorkBuddyShim;
   catalog: WorkBuddyCatalog | AggregateCatalog;
@@ -2857,7 +2868,7 @@ interface WorkBuddyAdapter {
  * the two apart by shape rather than by a flag, because the aggregate rows are a
  * different kind of record, not a differently-populated pool row.
  */
-export declare function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBuddyAdapter;
+declare function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBuddyAdapter;
 //#endregion
 //#region src/scheduler.d.ts
 /** How often the loop wakes to look for a due job. */
@@ -2868,8 +2879,8 @@ export declare function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions)
  * shows the old progress and the claim pass would skip a task that is in fact
  * now claimable. Measured: the chain is reflected by about eight seconds.
  */
-export declare const EVENT_SCORE_WAIT_MS = 9000;
-export declare const AUTOMATION_TICK_MS = 60000;
+declare const EVENT_SCORE_WAIT_MS = 9000;
+declare const AUTOMATION_TICK_MS = 60000;
 /** Which jobs the automation runs, and when. */
 /**
  * The persisted daily earnings ledger.
@@ -3098,10 +3109,10 @@ interface AutomationStatus {
 /** The three plus one job kinds, in a stable order. */
 type AutomationJobKind = 'checkin' | 'tasks' | 'report' | 'streak' | 'travel' | 'compensation';
 /** The jobs in the order a tick runs them: report before tasks, always. */
-export declare const AUTOMATION_JOB_KINDS: readonly AutomationJobKind[];
+declare const AUTOMATION_JOB_KINDS: readonly AutomationJobKind[];
 /** Reject anything that is not a job kind, so a route cannot name an unknown job. */
-export declare function isAutomationJobKind(value: unknown): value is AutomationJobKind;
-export declare function dayKey(date: Date, timeZone?: string): string;
+declare function isAutomationJobKind(value: unknown): value is AutomationJobKind;
+declare function dayKey(date: Date, timeZone?: string): string;
 /**
  * Whether `now`'s local hour is one of `hours`.
  *
@@ -3111,7 +3122,7 @@ export declare function dayKey(date: Date, timeZone?: string): string;
  * suspended process — a laptop that slept through 10:00 still runs the job the
  * moment it wakes, on the same day.
  */
-export declare function isFireHour(now: Date, hours: readonly number[]): boolean;
+declare function isFireHour(now: Date, hours: readonly number[]): boolean;
 /**
  * The points automation.
  *
@@ -3119,7 +3130,7 @@ export declare function isFireHour(now: Date, hours: readonly number[]): boolean
  * {@link start}, and {@link stop} is idempotent so a plugin teardown that fires
  * twice is harmless.
  */
-export declare class WorkBuddyScheduler {
+declare class WorkBuddyScheduler {
   private readonly pool;
   private readonly client;
   private readonly logger;
@@ -3467,17 +3478,17 @@ interface StatusOptions {
   includeCredits?: boolean;
 }
 /** Build the status document. Never throws. */
-export declare function buildStatus(options: StatusOptions): Promise<WorkBuddyStatus>;
+declare function buildStatus(options: StatusOptions): Promise<WorkBuddyStatus>;
 /** Format the status document for a terminal. */
-export declare function formatStatus(status: WorkBuddyStatus): string;
+declare function formatStatus(status: WorkBuddyStatus): string;
 /** Format the per-model credit multipliers. */
-export declare function formatRates(status: WorkBuddyStatus): string;
+declare function formatRates(status: WorkBuddyStatus): string;
 //#endregion
 //#region src/ignored.d.ts
 /** Directory holding this plugin's own state (imported snapshots, ignore list). */
-export declare const PLUGIN_DATA_DIR_NAME = ".xdpool";
+declare const PLUGIN_DATA_DIR_NAME = ".xdpool";
 /** File holding the permanent ignore list, inside {@link pluginDataDir}. */
-export declare const IGNORED_FILE_NAME = "ignored.json";
+declare const IGNORED_FILE_NAME = "ignored.json";
 /** One ignored account, as stored on disk and shown on the card. */
 type IgnoredAccount = PoolWebIgnoredAccount;
 /**
@@ -3487,11 +3498,11 @@ type IgnoredAccount = PoolWebIgnoredAccount;
  * `ignore` written from the terminal has to be visible to the running plugin,
  * which is only true if they agree on where "home" is.
  */
-export declare function dshHome(env?: NodeJS.ProcessEnv): string;
+declare function dshHome(env?: NodeJS.ProcessEnv): string;
 /** This plugin's own state directory. */
-export declare function pluginDataDir(env?: NodeJS.ProcessEnv): string;
+declare function pluginDataDir(env?: NodeJS.ProcessEnv): string;
 /** Absolute path of the ignore list. */
-export declare function ignoredIdsPath(env?: NodeJS.ProcessEnv): string;
+declare function ignoredIdsPath(env?: NodeJS.ProcessEnv): string;
 /**
  * Read the ignore list, tolerating every "no list yet" shape.
  *
@@ -3499,7 +3510,7 @@ export declare function ignoredIdsPath(env?: NodeJS.ProcessEnv): string;
  * the caller — nothing is ignored — so none of them throws. The pool must be
  * able to start on a machine that has never ignored anything.
  */
-export declare function readIgnoredAccounts(path?: string): Promise<IgnoredAccount[]>;
+declare function readIgnoredAccounts(path?: string): Promise<IgnoredAccount[]>;
 /**
  * Synchronous read, for startup.
  *
@@ -3509,7 +3520,7 @@ export declare function readIgnoredAccounts(path?: string): Promise<IgnoredAccou
  * once per boot. The file is a few hundred bytes, so a blocking read at startup
  * costs nothing measurable.
  */
-export declare function readIgnoredAccountsSync(path?: string): IgnoredAccount[];
+declare function readIgnoredAccountsSync(path?: string): IgnoredAccount[];
 /**
  * Replace the ignore list, atomically.
  *
@@ -3519,7 +3530,7 @@ export declare function readIgnoredAccountsSync(path?: string): IgnoredAccount[]
  * a truncated file reads as "nothing is ignored", which would quietly put every
  * discarded account back in the pool.
  */
-export declare function writeIgnoredAccounts(accounts: readonly IgnoredAccount[], path?: string): Promise<void>;
+declare function writeIgnoredAccounts(accounts: readonly IgnoredAccount[], path?: string): Promise<void>;
 /**
  * Add one account to the ignore list, preserving the rest.
  *
@@ -3527,22 +3538,22 @@ export declare function writeIgnoredAccounts(accounts: readonly IgnoredAccount[]
  * both be open, and each request names exactly one account, so re-writing the
  * whole list from a stale view would drop the other side's edits.
  */
-export declare function ignoreAccount(account: {
+declare function ignoreAccount(account: {
   id: string;
   label?: string;
 }, path?: string): Promise<IgnoredAccount[]>;
 /** Drop one account from the ignore list. Returns the resulting list. */
-export declare function unignoreAccount(accountId: string, path?: string): Promise<IgnoredAccount[]>;
+declare function unignoreAccount(accountId: string, path?: string): Promise<IgnoredAccount[]>;
 //#endregion
 //#region src/preferred.d.ts
 /** Absolute path of the preferred-account file. */
-export declare function preferredIdPath(env?: NodeJS.ProcessEnv): string;
+declare function preferredIdPath(env?: NodeJS.ProcessEnv): string;
 /**
  * Read the pinned id, tolerating every "no pin yet" shape.
  *
  * A missing file is the normal state on a fresh install, so it is not an error.
  */
-export declare function readPreferredId(path?: string): Promise<string | undefined>;
+declare function readPreferredId(path?: string): Promise<string | undefined>;
 /**
  * Synchronous read, for startup.
  *
@@ -3553,7 +3564,7 @@ export declare function readPreferredId(path?: string): Promise<string | undefin
  * The file is tens of bytes, so a blocking read at startup costs nothing
  * measurable.
  */
-export declare function readPreferredIdSync(path?: string): string | undefined;
+declare function readPreferredIdSync(path?: string): string | undefined;
 /**
  * Write (or clear) the pinned id, atomically.
  *
@@ -3568,7 +3579,7 @@ export declare function readPreferredIdSync(path?: string): string | undefined;
  * exactly one way for the next read to come back empty, and the directory stays
  * free of documents that describe the absence of a decision.
  */
-export declare function writePreferredId(accountId: string | undefined, path?: string): Promise<void>;
+declare function writePreferredId(accountId: string | undefined, path?: string): Promise<void>;
 //#endregion
 //#region src/relay.d.ts
 interface PoolRelayStatus {
@@ -3797,28 +3808,28 @@ interface PoolStatusRouteOptions {
  * are queried live; a failing query degrades to `creditsError` / `checkinError`
  * rather than failing the whole document. Never throws.
  */
-export declare function poolWebStatus(deps: PoolStatusRouteOptions, region?: PoolRegion): Promise<PoolWebStatus>;
+declare function poolWebStatus(deps: PoolStatusRouteOptions, region?: PoolRegion): Promise<PoolWebStatus>;
 /**
  * Mount the read-only routes on a context where `webServer` is available. The
  * caller uses `ctx.inject(['webServer'], ...)` so Desktop startup order cannot
  * make this registration disappear.
  */
-export declare function registerPoolStatusRoute(ctx: Context$1, deps: PoolStatusRouteOptions): void;
+declare function registerPoolStatusRoute(ctx: Context$1, deps: PoolStatusRouteOptions): void;
 //#endregion
 //#region src/index.d.ts
 /** Stable Cordis plugin name. */
-export declare const name = "llm-xdpool";
+declare const name = "llm-xdpool";
 /** The model registry required before the provider can register. */
-export declare const inject: string[];
+declare const inject: string[];
 /**
  * Settings namespace for the XD Pool card. Registering a section here
  * is what makes the provider appear on the Models settings page and causes the
  * Host to mount the plugin's client card under Plugin configuration — exactly
  * the mechanism the single-account connector uses.
  */
-export declare const XDPOOL_SETTINGS_NS: SettingsNamespace;
+declare const XDPOOL_SETTINGS_NS: SettingsNamespace;
 /** Plugin configuration. */
-export interface Config {
+interface Config {
   /** Explicit WorkBuddy desktop auth-file path override. */
   authFile?: string;
   /** Rate-limit cooldown per account, milliseconds. */
@@ -3898,7 +3909,7 @@ export interface Config {
   automationEarnings?: AutomationLedger;
 }
 /** One region's saved model selection. */
-export interface ModelSelectionConfig {
+interface ModelSelectionConfig {
   enabledModelIds?: string[];
   imageModelIds?: string[];
   contextBudgets?: Record<string, number>;
@@ -3915,7 +3926,7 @@ export interface ModelSelectionConfig {
  * lights the growth streak and unlocks the `first_buddy` family, so a task pass
  * that ran first would read counters before they could have moved.
  */
-export interface AutomationConfig {
+interface AutomationConfig {
   /** Master switch for every automation job. Absent reads as false. */
   enabled?: boolean;
   /** Hours (local, 0-23) at which the daily check-in runs. */
@@ -3934,7 +3945,7 @@ export interface AutomationConfig {
   exhaustCooldownMs?: number;
 }
 /** Upper bound the card offers as the "default" context window, in tokens. */
-export declare const DEFAULT_CONTEXT_BUDGET = 200000;
+declare const DEFAULT_CONTEXT_BUDGET = 200000;
 /**
  * Fold a saved automation block into scheduler options.
  *
@@ -3942,9 +3953,9 @@ export declare const DEFAULT_CONTEXT_BUDGET = 200000;
  * `enabled` as a real boolean, and a config that never touched the section must
  * not accidentally arm background upstream traffic.
  */
-export declare function automationOptions(automation: AutomationConfig | undefined): AutomationOptions;
+declare function automationOptions(automation: AutomationConfig | undefined): AutomationOptions;
 /** Settings key holding one region's saved selection. */
-export declare const modelSelectionKeyFor: (region: 'cn' | 'global') => string;
+declare const modelSelectionKeyFor: (region: 'cn' | 'global') => string;
 /**
  * Plugin configuration schema.
  *
@@ -3963,9 +3974,9 @@ export declare const modelSelectionKeyFor: (region: 'cn' | 'global') => string;
  * the value the running instance reads is a plain value either way once
  * unwrapped.
  */
-export declare const Config: z<Config>;
+declare const Config: z<Config>;
 /** Everything the CLI needs from a live plugin instance. */
-export interface WorkBuddyPoolApi {
+interface WorkBuddyPoolApi {
   pool: WorkBuddyAccountPool;
   /** One catalog per region, matching the two registered providers. */
   catalogs: Readonly<Record<WorkBuddyRegion, WorkBuddyCatalog>>;
@@ -3979,9 +3990,9 @@ export interface WorkBuddyPoolApi {
   scheduler: WorkBuddyScheduler;
 }
 /** The live API, or undefined when the plugin has not applied yet. */
-export declare function currentApi(): WorkBuddyPoolApi | undefined;
+declare function currentApi(): WorkBuddyPoolApi | undefined;
 /** Test seam: install an API instance without booting cordis. */
-export declare function setApi(next: WorkBuddyPoolApi | undefined): void;
+declare function setApi(next: WorkBuddyPoolApi | undefined): void;
 /** Assemble the runtime objects without registering anything. */
 /**
  * Assemble the runtime objects without registering anything.
@@ -3991,7 +4002,7 @@ export declare function setApi(next: WorkBuddyPoolApi | undefined): void;
  * whichever list happened to be fetched first (always the CN one, since the
  * seeding step read `accounts[0]`).
  */
-export declare function createCore(logger?: {
+declare function createCore(logger?: {
   warn(...args: unknown[]): void;
   info?(...args: unknown[]): void;
 }): {
@@ -4008,6 +4019,6 @@ export declare function createCore(logger?: {
  * discover accounts. The provider registers only after `shim.ready` resolves,
  * because its models read the shim origin at construction time.
  */
-export declare function apply(ctx: Context, config?: Config): void;
+declare function apply(ctx: Context, config?: Config): void;
 //#endregion
-export type { AccountStatus, AutomationLedger, AutomationRunSummary, AutomationStatus, Context, ExpertUseMode, IgnoredAccount, MarketExpert, ModelSelection, PoolStatusRouteOptions, PoolWebAccountIgnore, PoolWebCheckin, PoolWebCheckinClaim, PoolWebIgnoredAccount, PoolWebModel, PoolWebModelSelection, PoolWebStatus, SchedulerLogger, TaskEventChain, TaskEventTransport, UpstreamErrorKind, WorkBuddyAccount, WorkBuddyAdapter, WorkBuddyCredential, WorkBuddyModelInfo, WorkBuddyShim, WorkBuddyStatus };
+export { APPEARANCE_THEME_KEY, AUTOMATION_JOB_KINDS, AUTOMATION_TICK_MS, type AccountStatus, AutomationConfig, type AutomationLedger, type AutomationRunSummary, type AutomationStatus, BUDDY_APP_ID, BUDDY_APP_NAME, Config, type Context, DEFAULT_AUTOMATION_HOURS, DEFAULT_CONTEXT_BUDGET, EVENT_SCORE_WAIT_MS, type ExpertUseMode, FALLBACK_WORKBUDDY_MODELS, IGNORED_FILE_NAME, type IgnoredAccount, LIBRARY_DOC_URL, LIGHTHOUSE_EXPERT_ID, type MarketExpert, type ModelSelection, ModelSelectionConfig, PLAYBOOK_CASE_ID, PLAYBOOK_CASE_NAME, PLUGIN_DATA_DIR_NAME, POOL_ACCOUNT_IGNORE_PATH, POOL_AUTOMATION_RUN_PATH, POOL_CHECKIN_PATH, POOL_CREDIT_RESERVE_PATH, POOL_MODELS_SAVE_PATH, POOL_RESCAN_PATH, POOL_RESET_COOLDOWN_PATH, POOL_STATUS_PATH, type PoolStatusRouteOptions, type PoolWebAccountIgnore, type PoolWebCheckin, type PoolWebCheckinClaim, type PoolWebIgnoredAccount, type PoolWebModel, type PoolWebModelSelection, type PoolWebStatus, SKILL_ID, SKILL_NAME, type SchedulerLogger, TEMPLATE_PRESETS, type TaskEventChain, type TaskEventTransport, type UpstreamErrorKind, WORKBUDDY_AUTH_FILE_ENV, WORKBUDDY_LIVE_FILENAME, type WorkBuddyAccount, WorkBuddyAccountPool, type WorkBuddyAdapter, WorkBuddyCatalog, type WorkBuddyCredential, type WorkBuddyModelInfo, WorkBuddyPoolApi, WorkBuddyScheduler, type WorkBuddyShim, type WorkBuddyStatus, WorkBuddyUpstreamClient, XDPOOL_PROVIDER, XDPOOL_SETTINGS_NS, appearanceChain, apply, automationChain, automationOptions, buddyAppChain, buddyAppEvents, buildStatus, candidateAuthDirs, canvasChain, chatChain, classifyUpstreamError, createCore, createWorkBuddyAdapter, createWorkBuddyShim, currentApi, dayKey, defaultDesktopAuthDirs, desktopAutomationCreatedEvent, desktopCanvasEvents, desktopChatEvents, dshHome, expertActualUseEvent, expertChatEvents, expertSummonEvents, formatRates, formatStatus, ignoreAccount, ignoredIdsPath, inject, isAutomationJobKind, isFireHour, libraryReadChain, modelSelectionKeyFor, name, parseRateLimitReset, parseWorkBuddyAuth, playbookChain, pluginDataDir, poolWebStatus, preferredIdPath, readIgnoredAccounts, readIgnoredAccountsSync, readPreferredId, readPreferredIdSync, registerPoolStatusRoute, setApi, skillChain, templateChain, templateChains, unignoreAccount, workbuddyAccountId, writeIgnoredAccounts, writePreferredId };

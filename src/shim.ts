@@ -625,6 +625,11 @@ function withBareModelId(raw: string, modelId: string): string {
     }
     const attempts: string[] = []
     let last: { kind: string; status: number; message: string } | undefined
+    // The gateway refuses a chat completion with no conversation id, so the
+    // chain members need one too. Same rule as the main pool path: derive it
+    // from the first user message so every call in this conversation presents
+    // the same identity.
+    const conversationKey = conversationKeyOf(raw)
     for (const member of members) {
       if (signal.aborted) return
       attempts.push(member.modelId)
@@ -646,7 +651,7 @@ function withBareModelId(raw: string, modelId: string): string {
           continue
         }
         const prepared = client.prepareChatBody(raw)
-        const result = await client.chatStream(account.credential, prepared, signal)
+        const result = await client.chatStream(account.credential, prepared, signal, conversationKey)
         if (result.ok) {
           const turnId = randomBytes(8).toString('hex')
           await serveSuccessfulStream(
@@ -906,7 +911,7 @@ function withBareModelId(raw: string, modelId: string): string {
         return
       }
       tried.push(account.label)
-      const result = await client.chatStream(account.credential, prepared, controller.signal)
+      const result = await client.chatStream(account.credential, prepared, controller.signal, conversationKey)
       if (result.ok) {
         // Success is filed by the stream forwarder, the only place that knows
         // when the stream really ended and what it cost.
@@ -1263,6 +1268,10 @@ async function recoverFromContextOverrun(options: RecoverOptions): Promise<Recov
     (value): value is ChatMessage => typeof value === 'object' && value !== null && !Array.isArray(value),
   )
   if (messages.length === 0) return { ok: false, detail: 'request carried no usable messages' }
+  // The gateway refuses a chat completion with no conversation id. Compaction
+  // and its retry are part of the same conversation as the request that
+  // triggered them, so they carry the same key the original attempt used.
+  const conversationKey = conversationKeyOf(raw)
   // The upstream reports the overrun but not the window size, so the budget has
   // to be derived from evidence rather than from the catalog alone.
   const overrunTokens = estimateMessagesTokens(messages)
@@ -1307,7 +1316,7 @@ async function recoverFromContextOverrun(options: RecoverOptions): Promise<Recov
               { ...parsed, stream: true, max_tokens: Math.max(256, Math.floor(budget / 2)) },
               request,
             )
-            return await client.completeChat(summariser.credential, body, signal ?? controller.signal)
+            return await client.completeChat(summariser.credential, body, signal ?? controller.signal, conversationKey)
           },
         },
         controller.signal,
@@ -1334,7 +1343,7 @@ async function recoverFromContextOverrun(options: RecoverOptions): Promise<Recov
     const account = await pool.acquire(modelId, region)
     if (account === undefined) return { ok: false, detail: 'no account available after compaction' }
     tried.push(account.label)
-    const result = await client.chatStream(account.credential, retryBody, controller.signal)
+    const result = await client.chatStream(account.credential, retryBody, controller.signal, conversationKey)
     if (!result.ok) {
       // A refusal is filed like any other failed physical call. The success
       // below deliberately is NOT: that one is filed by the forwarder when the

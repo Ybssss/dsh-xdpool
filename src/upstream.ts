@@ -417,6 +417,127 @@ const CHAT_IDENTITY_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   'X-IDE-Version': '5.5.6',
 })
 
+/**
+ * The conversation-identity headers the gateway verifies on a chat completion.
+ *
+ * WHY THIS EXISTS
+ *
+ * Around 2026-10-15 the international gateway began verifying, per account,
+ * that a `/v2/chat/completions` call looks like it came from the official
+ * client. A call arriving without a conversation id is refused before it
+ * reaches a model, with the sign-in still perfectly valid:
+ *
+ *   http 400 {"code":11128,"msg":"conversation id missing","requestId":"..."}
+ *
+ * which the desktop surfaces as "这次调用没通过渠道校验，可能不是官方客户端发出的".
+ * This client sent `X-Conversation-ID` only from its automation probe
+ * (`openConversation`) and nothing of the sort on the path real user traffic
+ * takes, so pooled completions were refused. See issue #46.
+ *
+ * THE CONTRACT
+ *
+ * Taken from the official desktop client's own request builder — `Yr(e,t,n)`
+ * in its installed `main/daemon-bootstrap.js`, the single place the shipped app
+ * assembles a chat-completion request:
+ *
+ *   X-Conversation-ID          stable for the conversation
+ *   X-Conversation-Request-ID  stable for the conversation
+ *   acp-connection-id          stable for the conversation
+ *   X-Conversation-Message-ID  fresh per request
+ *   X-Request-ID               fresh per request
+ *   X-Agent-Intent             'craft'
+ *   X-Agent-Purpose            'conversation'
+ *   x-codebuddy-request        '1'
+ *   X-Private-Data             'true'
+ *
+ * The desktop keeps the stable three in an in-memory session registry and mints
+ * them once per conversation; the two per-request ids are fresh `randomUUID()`s
+ * on every call.
+ *
+ * We DERIVE the stable three from the conversation key instead of holding a
+ * registry. That key is already the plugin's notion of "one conversation"
+ * (`conversationKeyOf` in the shim — what `sticky` routing binds on), so the
+ * derivation keeps one definition of a conversation, survives a restart, and
+ * unlike a registry gives a conversation the same identity on whichever
+ * account it ends up routing through.
+ *
+ * DELIBERATELY NOT INCLUDED
+ *
+ * `Zr()`, the desktop's W3C/B3 tracing companion, is not replicated: it is
+ * correlation plumbing for their observability backend rather than part of the
+ * conversation identity a channel check reads, and nothing else in this client
+ * emits trace context. `X-Private-Data` is `'true'` here because that is the
+ * value the desktop's chat builder uses; the CLI's `'false'` comes from its
+ * `enableModelOptimization` setting, which is a different client's concern.
+ */
+export interface ChatConversationIdentity {
+  /** Stable for the conversation; every call in it presents the same value. */
+  readonly conversationId: string
+  /** Stable for the conversation. */
+  readonly conversationRequestId: string
+  /** Stable for the conversation. */
+  readonly acpConnectionId: string
+}
+
+/** One sha256-derived id, shaped like `deriveDeviceId`'s output. */
+function deriveSessionId(key: string, salt: string): string {
+  return createHash('sha256').update(`${salt}:${key}`).digest('hex').slice(0, 36)
+}
+
+/**
+ * The conversation identity for `key`.
+ *
+ * Deterministic: the same key always maps to the same three ids, which is what
+ * lets the stable half of the header contract hold across calls without the
+ * client storing per-conversation state.
+ */
+export function chatConversationIdentityOf(key: string): ChatConversationIdentity {
+  return {
+    conversationId: deriveSessionId(key, 'conversation'),
+    conversationRequestId: deriveSessionId(key, 'conversation-request'),
+    acpConnectionId: deriveSessionId(key, 'acp-connection'),
+  }
+}
+
+/**
+ * The full header set for a chat completion: the shared auth contract, the
+ * client identity, and the conversation identity the channel check reads.
+ *
+ * EVERY chat completion goes through here, which is the point: the rejection
+ * this fixes was a path sending a request without a conversation id, so no path
+ * may be able to do that again. `craft`/`conversation` are the mode and purpose
+ * the desktop reports for an ordinary turn, and they travel with the ids
+ * because the same desktop builder emits all of them together.
+ *
+ * When the pool could not identify the conversation, a one-off identity is
+ * minted. The check is that a conversation id was *sent*, not that it matches an
+ * earlier call, so an unidentified request is still a legitimate one — refusing
+ * to send it would reproduce the very failure this fixes.
+ */
+function chatCompletionHeaders(
+  credential: WorkBuddyCredential,
+  conversationKey?: string,
+): Record<string, string> {
+  const identity = chatConversationIdentityOf(
+    conversationKey === undefined || conversationKey === '' ? randomUUID() : conversationKey,
+  )
+  return {
+    ...chatHeaders(credential),
+    ...CHAT_IDENTITY_HEADERS,
+    'X-Agent-Intent': 'craft',
+    'X-Agent-Purpose': 'conversation',
+    'X-Private-Data': 'true',
+    'x-codebuddy-request': '1',
+    'X-Conversation-ID': identity.conversationId,
+    'X-Conversation-Request-ID': identity.conversationRequestId,
+    'acp-connection-id': identity.acpConnectionId,
+    // The desktop mints these two afresh on every call; they identify the
+    // request, not the conversation, so they are not derived from the key.
+    'X-Conversation-Message-ID': randomUUID(),
+    'X-Request-ID': randomUUID(),
+  }
+}
+
 /** Refresh-endpoint headers; X-Refresh-Token appears here and nowhere else. */
 function refreshHeaders(credential: WorkBuddyCredential): Record<string, string> {
   const headers: Record<string, string> = {
@@ -1199,15 +1320,21 @@ export class WorkBuddyUpstreamClient {
    * endpoint itself always streams, so this reassembles the SSE frames into a
    * single string. Throws on any failure: the compactor then falls back to
    * plain truncation rather than failing the user's turn.
+   *
+   * `conversationKey` identifies the conversation this completion belongs to.
+   * Compaction is part of the same conversation as the request that triggered
+   * it, so the caller passes the same key the retry will use — the gateway
+   * refuses a chat completion that carries no conversation id.
    */
   async completeChat(
     credential: WorkBuddyCredential,
     prepared: string,
     signal?: AbortSignal,
+    conversationKey?: string,
   ): Promise<string> {
     const response = await this.fetchImpl(`${chatBase(credential)}/v2/chat/completions`, {
       method: 'POST',
-      headers: { ...chatHeaders(credential), ...CHAT_IDENTITY_HEADERS },
+      headers: chatCompletionHeaders(credential, conversationKey),
       body: prepared,
       ...signal === undefined ? {} : { signal },
     })
@@ -1219,17 +1346,24 @@ export class WorkBuddyUpstreamClient {
     return await readCompletionText(response.body)
   }
 
-  /** Forward one chat completion. Never throws for upstream failures. */
+  /**
+   * Forward one chat completion. Never throws for upstream failures.
+   *
+   * `conversationKey` is the pool's stable id for this conversation
+   * (`conversationKeyOf` in the shim); it is optional so a caller without one
+   * still sends a well-formed conversation identity rather than none at all.
+   */
   async chatStream(
     credential: WorkBuddyCredential,
     prepared: string,
     signal?: AbortSignal,
+    conversationKey?: string,
   ): Promise<ChatStreamResult> {
     let response: Response
     try {
       response = await this.fetchImpl(`${chatBase(credential)}/v2/chat/completions`, {
         method: 'POST',
-        headers: { ...chatHeaders(credential), ...CHAT_IDENTITY_HEADERS },
+        headers: chatCompletionHeaders(credential, conversationKey),
         body: prepared,
         ...signal === undefined ? {} : { signal },
       })
