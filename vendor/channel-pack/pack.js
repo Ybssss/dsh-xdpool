@@ -34239,7 +34239,11 @@ var CODEBUDDY_FALLBACK_MODELS = [
     name: "GLM-5.1",
     contextWindow: 2e5,
     supportsImages: true,
-    reasoningEfforts: ["medium"],
+    // Measured 2026-10-21 against the live gateway: all five levels answered
+    // 200 with a distinct reasoning_content length per level. The single level
+    // this used to declare was a guess, and it hid four working levels from
+    // the picker.
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     maxOutputTokens: 48e3
   },
   {
@@ -34247,7 +34251,11 @@ var CODEBUDDY_FALLBACK_MODELS = [
     name: "GLM-5V-Turbo",
     contextWindow: 2e5,
     supportsImages: true,
-    reasoningEfforts: ["medium"],
+    // Measured 2026-10-21 against the live gateway: all five levels answered
+    // 200 with a distinct reasoning_content length per level. The single level
+    // this used to declare was a guess, and it hid four working levels from
+    // the picker.
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     maxOutputTokens: 64e3
   },
   {
@@ -34255,7 +34263,11 @@ var CODEBUDDY_FALLBACK_MODELS = [
     name: "Kimi-K3-1",
     contextWindow: 1e6,
     supportsImages: true,
-    reasoningEfforts: ["medium"],
+    // Measured 2026-10-21 against the live gateway: all five levels answered
+    // 200 with a distinct reasoning_content length per level. The single level
+    // this used to declare was a guess, and it hid four working levels from
+    // the picker.
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     maxOutputTokens: 32e3
   },
   {
@@ -34274,7 +34286,11 @@ var CODEBUDDY_FALLBACK_MODELS = [
     name: "Kimi-K2.7",
     contextWindow: 256e3,
     supportsImages: true,
-    reasoningEfforts: ["medium"],
+    // Measured 2026-10-21 against the live gateway: all five levels answered
+    // 200 with a distinct reasoning_content length per level. The single level
+    // this used to declare was a guess, and it hid four working levels from
+    // the picker.
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     maxOutputTokens: 32e3
   },
   {
@@ -34282,7 +34298,11 @@ var CODEBUDDY_FALLBACK_MODELS = [
     name: "Kimi-K2.6",
     contextWindow: 256e3,
     supportsImages: true,
-    reasoningEfforts: ["medium"],
+    // Measured 2026-10-21 against the live gateway: all five levels answered
+    // 200 with a distinct reasoning_content length per level. The single level
+    // this used to declare was a guess, and it hid four working levels from
+    // the picker.
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     maxOutputTokens: 32e3
   },
   {
@@ -34290,7 +34310,11 @@ var CODEBUDDY_FALLBACK_MODELS = [
     name: "MiniMax-M3",
     contextWindow: 512e3,
     supportsImages: true,
-    reasoningEfforts: ["medium"],
+    // Measured 2026-10-21 against the live gateway: all five levels answered
+    // 200 with a distinct reasoning_content length per level. The single level
+    // this used to declare was a guess, and it hid four working levels from
+    // the picker.
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     maxOutputTokens: 64e3
   }
 ];
@@ -34316,8 +34340,8 @@ var WORKBUDDY_FALLBACK_MODELS = [
   // （`node scripts/dump-max-output.mjs`）。该值就是用户在 IDE 里实际拿到的
   // 单次输出额度，远端不可用时由本表顶替。远端未下发的模型保持 undefined。
   { id: "default-model", name: "Auto", contextWindow: 176e3, supportsImages: true, maxOutputTokens: 24e3 },
-  { id: "fast-model", name: "Fast", contextWindow: 2e5, supportsImages: true, reasoningEfforts: ["medium"], maxOutputTokens: 32e3 },
-  { id: "balanced-model", name: "Balanced", contextWindow: 256e3, supportsImages: true, reasoningEfforts: ["medium"], maxOutputTokens: 32e3 },
+  { id: "fast-model", name: "Fast", contextWindow: 2e5, supportsImages: true, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], maxOutputTokens: 32e3 },
+  { id: "balanced-model", name: "Balanced", contextWindow: 256e3, supportsImages: true, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], maxOutputTokens: 32e3 },
   { id: "primary-model", name: "Primary", contextWindow: 272e3, supportsImages: true, reasoningEfforts: ["high"], maxOutputTokens: 72e3 },
   { id: "deep-model", name: "Deep", contextWindow: 176e3, supportsImages: true, maxOutputTokens: 24e3 },
   {
@@ -34349,14 +34373,14 @@ var WORKBUDDY_FALLBACK_MODELS = [
     defaultReasoningEffort: "high",
     maxOutputTokens: 64e3
   },
-  { id: "deepseek-v4.1-flash", name: "Deepseek-V4.1-Flash", contextWindow: 1e6, supportsImages: true, reasoningEfforts: ["high"], defaultReasoningEffort: "high", maxOutputTokens: 128e3 },
+  { id: "deepseek-v4.1-flash", name: "Deepseek-V4.1-Flash", contextWindow: 1e6, supportsImages: true, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], defaultReasoningEffort: "high", maxOutputTokens: 128e3 },
   {
     // 2026-09 补录：新加坡区的同代模型（-sg 后缀），远端下发且实测能看图。
     id: "deepseek-v4.1-flash-sg",
     name: "Deepseek-V4.1-Flash",
     contextWindow: 1e6,
     supportsImages: true,
-    reasoningEfforts: ["high"],
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     defaultReasoningEffort: "high",
     maxOutputTokens: 128e3
   },
@@ -34416,7 +34440,11 @@ var WORKBUDDY_FALLBACK_MODELS = [
   },
   // gpt-5.3-codex：远端未下发 maxOutputTokens，故不填（保持 undefined，
   // 交由网关默认），不臆造数值。
-  { id: "gpt-5.3-codex", name: "GPT-5.3-Codex", contextWindow: 272e3, supportsImages: true, reasoningEfforts: ["medium"] },
+  // gpt-5.3-codex answered 200 at every level, but returned an EMPTY
+  // reasoning_content at all five — the levels are legal yet not observably
+  // distinct. Declaring the ladder states what may be sent; it does not
+  // claim the model thinks.
+  { id: "gpt-5.3-codex", name: "GPT-5.3-Codex", contextWindow: 272e3, supportsImages: true, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"] },
   { id: "gemini-3.5-flash", name: "Gemini-3.5-Flash", contextWindow: 1e6, supportsImages: true, reasoningEfforts: ["medium"], maxOutputTokens: 65536 },
   {
     id: "glm-5.3",
@@ -34436,7 +34464,7 @@ var WORKBUDDY_FALLBACK_MODELS = [
     defaultReasoningEffort: "high",
     maxOutputTokens: 48e3
   },
-  { id: "kimi-k3", name: "Kimi-K3", contextWindow: 1e6, supportsImages: true, reasoningEfforts: ["medium"], maxOutputTokens: 32e3 },
+  { id: "kimi-k3", name: "Kimi-K3", contextWindow: 1e6, supportsImages: true, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], maxOutputTokens: 32e3 },
   {
     // 2026-09 补录：远端 /v3/config 的 cli agent 白名单里有它，兜底表原先漏了。
     id: "kimi-k2.8-preview",
@@ -34447,7 +34475,7 @@ var WORKBUDDY_FALLBACK_MODELS = [
     defaultReasoningEffort: "high",
     maxOutputTokens: 32e3
   },
-  { id: "kimi-k2.6", name: "Kimi-K2.6", contextWindow: 256e3, supportsImages: true, reasoningEfforts: ["medium"], maxOutputTokens: 32e3 }
+  { id: "kimi-k2.6", name: "Kimi-K2.6", contextWindow: 256e3, supportsImages: true, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], maxOutputTokens: 32e3 }
 ];
 var WORKBUDDY = {
   id: "workbuddy",

@@ -20,6 +20,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import http, { createServer } from 'node:http'
+// Our own class, not the global one: `instanceof` against the built-in would
+// never match, and a passing test that asserts the wrong class proves nothing.
+import { AggregateError } from '../src/aggregate.ts'
 import {
   FREE_CLIENT_UA,
   REQUEST_RE,
@@ -689,6 +692,35 @@ describe('the free lane transport', () => {
     expect(seen[0]?.headers.authorization).toBe('Bearer public')
     expect(seen[0]?.headers['x-opencode-session']).toBe('ses_0000000000000000000000000000')
     expect(JSON.parse(seen[0]?.body ?? '{}')).toMatchObject({ model: 'space-bunny-free', stream: true })
+  }, SLOW)
+
+  it('says the free quota is counted per conversation, not per lane', async () => {
+    /*
+      The gateway's own sentence is "the provider asked to wait 74558s" — twenty
+      hours, which reads as a ban on the whole free tier. It is per upstream
+      session, so a new conversation starts with its own budget. Without that
+      clause the only sane reading of the message is "stop using the free lane".
+    */
+    await withGateway(
+      { turn: { status: 429, headers: { 'retry-after': '74558' }, body: '{"error":{"message":"Rate limit exceeded. Please try again later."}}' } },
+      async () => {
+        const failure = await postFreeStreamed({
+          modelId: 'space-bunny-free',
+          body: { messages: [{ role: 'user', content: 'hi' }] },
+          session: 'ses_0000000000000000000000000000',
+          requestId: 'msg_0000000000000000000000000000',
+          hooks: { onDelta: () => undefined },
+        }).then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        expect(failure).toBeInstanceOf(AggregateError)
+        const error = failure as AggregateError
+        expect(error.kind).toBe('soft_rate')
+        expect(error.message).toContain('74558s')
+        expect(error.message).toContain('per conversation')
+      },
+    )
   }, SLOW)
 
   it('holds the finish reason to what the caller can run', async () => {

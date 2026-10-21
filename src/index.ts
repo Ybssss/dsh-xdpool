@@ -26,6 +26,7 @@ import {
   XDPOOL_PROVIDER,
   EXTRA_LANE_NAMES,
   createWorkBuddyAdapter,
+  type AdapterHandle,
   type WorkBuddyAdapter,
 } from './adapter.ts'
 import { AggregateCatalog, probeAggregateProvider, type AggregateModelRow } from './aggregate.ts'
@@ -968,6 +969,65 @@ function canonicalJson(value: unknown): string {
   }
   return JSON.stringify(value)
 }
+/**
+ * The thinking levels the HOST will accept for one model, as its picker sees
+ * them.
+ *
+ * `registerModelDiscovery` is the only channel the host reads a model's
+ * capabilities from, and the host refuses an explicitly requested effort unless
+ * the entry names it:
+ *
+ *   `provider "…" model "…" does not support reasoning effort "max"`
+ *
+ * (`info.reasoning === undefined` rejects EVERY level, not just the odd ones.)
+ * The pi-ai adapter's `thinkingLevelMap` covers the wire side, but it is a
+ * different object and never reaches this validation, so a model that answers
+ * `max` upstream still failed to save `max` in the picker. Declaring the ladder
+ * here is what makes the selection legal.
+ *
+ * Undeclared levels stay absent rather than `null`: the host reads `efforts` as
+ * "what may be chosen", so omitting an unsupported level is the same statement
+ * as `thinkingLevelMap`'s `null` without inventing a shape it does not parse.
+ */
+function discoveryReasoning(
+  efforts: readonly string[] | undefined,
+): { reasoning: { efforts: readonly { id: string, name: string }[] } } | Record<string, never> {
+  const levels = EFFORT_ORDER.filter(level => efforts?.includes(level) === true)
+  if (levels.length === 0) return {}
+  return { reasoning: { efforts: levels.map(id => ({ id, name: EFFORT_LABEL[id] ?? id })) } }
+}
+/** Display names for the ladder; the host renders these verbatim. */
+const EFFORT_LABEL: Readonly<Record<string, string>> = Object.freeze({
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+})
+/**
+ * Canonical order for the ladder, matching `thinkingLevelMap` in adapter.ts.
+ *
+ * Both places have to agree: the adapter decides which level is SENT, this
+ * decides which may be CHOSEN, and a level present in one but not the other is
+ * either an unselectable capability or a selection that silently maps to
+ * nothing.
+ */
+const EFFORT_ORDER: readonly string[] = Object.freeze(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+/**
+ * The free lane publishes a boolean, not a ladder, so a thinking model there
+ * offers the levels every such model on that gateway answers. Kept narrow on
+ * purpose: the lane's own probe is what proved it thinks at all.
+ */
+const FREE_LANE_EFFORTS: readonly string[] = Object.freeze(['low', 'medium', 'high'])
+/** Read the optional ladder off an aggregate/free row without casting it. */
+function effortsOfAggregateRow(row: object): readonly string[] | undefined {
+  if (!('efforts' in row)) return undefined
+  const efforts = (row as { efforts?: unknown }).efforts
+  if (!Array.isArray(efforts)) return undefined
+  const out = efforts.filter((entry): entry is string => typeof entry === 'string')
+  return out.length === 0 ? undefined : out
+}
   /**
    * The namespace `settings.update` expects on the running line.
    *
@@ -1630,10 +1690,16 @@ function canonicalJson(value: unknown): string {
             extraRows: () => freeCatalog.current(),
           }),
         } as const
-        let releaseAdapterCn: (() => void) | undefined
-        let releaseAdapterGlobal: (() => void) | undefined
-        let releaseAdapterAggregate: (() => void) | undefined
-        let releaseAdapterFree: (() => void) | undefined
+        // The disposer the host hands back from `registerAdapter` also carries
+        // `replace(routes)`. That is the ONLY way a plugin can make the host
+        // publish `llm/adapters-updated`: the event is emitted from the host's
+        // own `commitRoutes`, which no plugin can reach. Re-registering under
+        // the same identities is the documented shape of "these routes are now
+        // served by a rebuilt adapter".
+        let releaseAdapterCn: AdapterHandle | undefined
+        let releaseAdapterGlobal: AdapterHandle | undefined
+        let releaseAdapterAggregate: AdapterHandle | undefined
+        let releaseAdapterFree: AdapterHandle | undefined
         let releaseDirectory: (() => void) | undefined
         // Adapters first, in a try of their own, and ONLY THEN the directory.
         //
@@ -1748,6 +1814,29 @@ function canonicalJson(value: unknown): string {
           adaptersByRegion.global.invalidate()
           adaptersByRegion.aggregate.invalidate()
           adaptersByRegion.free.invalidate()
+          // `invalidate()` only swaps the adapter's own snapshot. The host keeps
+          // a second snapshot keyed by the identity of our `profiles` map, and
+          // it is the host's copy the picker reads — so rebuilding here without
+          // re-committing the routes leaves the visible list untouched. Asking
+          // the handle to replace its (unchanged) route set is what makes the
+          // host drop that cache and publish `llm/adapters-updated`, which is
+          // also what refreshes every open client view.
+          for (const [handle, routes] of [
+            [releaseAdapterCn, [POOL_PROVIDER_BY_REGION.cn]],
+            [releaseAdapterGlobal, [POOL_PROVIDER_BY_REGION.global]],
+            [releaseAdapterAggregate, [XDPOOL_AGGREGATE_PROVIDER]],
+            [releaseAdapterFree, [XDPOOL_FREE_PROVIDER]],
+          ] as const) {
+            if (handle === undefined) continue
+            try {
+              handle.replace([...routes])
+            } catch (error: unknown) {
+              // A released registration throws REGISTRATION_DISPOSED. Reload
+              // during teardown is ordinary, so this must not take the settings
+              // apply down with it.
+              ctx.logger.warn('dsh-xdpool: could not re-announce adapter routes', error)
+            }
+          }
         }
         // A stored provider (key added, provider switched off, model list pinned)
         // rewrites the aggregate roster. Without this the picker's three-region
@@ -1793,6 +1882,9 @@ function canonicalJson(value: unknown): string {
               contextWindow: row.contextWindow,
               maxTokens: row.maxOutput,
               inputModalities: row.vision ? ['text', 'image'] : ['text'],
+              // `row.reasoning` is the free lane's boolean ("this model thinks"),
+              // not a level list, so the ladder is left undeclared here.
+              ...discoveryReasoning(row.reasoning ? FREE_LANE_EFFORTS : undefined),
             }))
           }
           if (request.provider === XDPOOL_AGGREGATE_PROVIDER) {
@@ -1806,6 +1898,7 @@ function canonicalJson(value: unknown): string {
               contextWindow: row.contextWindow,
               maxTokens: row.maxOutputTokens,
               inputModalities: row.supportsImages ? ['text', 'image'] : ['text'],
+              ...discoveryReasoning(effortsOfAggregateRow(row)),
             }))
           }
           if (request.provider !== XDPOOL_PROVIDER
@@ -1817,6 +1910,7 @@ function canonicalJson(value: unknown): string {
             contextWindow: model.contextWindow,
             maxTokens: model.maxOutputTokens,
             inputModalities: model.supportsImages ? ['text', 'image'] : ['text'],
+            ...discoveryReasoning(model.supportedEfforts),
           }))
         })
         ctx.logger.info?.(

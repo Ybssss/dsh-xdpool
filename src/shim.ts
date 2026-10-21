@@ -625,10 +625,10 @@ function withBareModelId(raw: string, modelId: string): string {
     }
     const attempts: string[] = []
     let last: { kind: string; status: number; message: string } | undefined
-    // The gateway refuses a chat completion with no conversation id, so the
-    // chain members need one too. Same rule as the main pool path: derive it
-    // from the first user message so every call in this conversation presents
-    // the same identity.
+    // The chain path had no conversation identity at all, which meant a combo
+    // turn reached the gateway with no session headers and was refused with
+    // 11128 in exactly the same way the single-model path was. Derived from the
+    // same body, so every member of the chain files under one conversation.
     const conversationKey = conversationKeyOf(raw)
     for (const member of members) {
       if (signal.aborted) return
@@ -650,7 +650,10 @@ function withBareModelId(raw: string, modelId: string): string {
           }
           continue
         }
-        const prepared = client.prepareChatBody(raw)
+        // Region-aware normalisation: a chain member belongs to this shim's
+        // region, so the two region-only rules (leading system on global, the
+        // `off` effort everywhere) can be applied here.
+        const prepared = client.prepareChatBodyFor(raw, region ?? 'cn')
         const result = await client.chatStream(account.credential, prepared, signal, conversationKey)
         if (result.ok) {
           const turnId = randomBytes(8).toString('hex')
@@ -815,7 +818,7 @@ function withBareModelId(raw: string, modelId: string): string {
       )
       return
     }
-    const prepared = client.prepareChatBody(raw)
+    const prepared = client.prepareChatBodyFor(raw, region ?? 'cn')
     // `sticky` binds each conversation to one account; the pool ignores this
     // under every other distribution.
     const conversationKey = conversationKeyOf(raw)
@@ -1268,10 +1271,6 @@ async function recoverFromContextOverrun(options: RecoverOptions): Promise<Recov
     (value): value is ChatMessage => typeof value === 'object' && value !== null && !Array.isArray(value),
   )
   if (messages.length === 0) return { ok: false, detail: 'request carried no usable messages' }
-  // The gateway refuses a chat completion with no conversation id. Compaction
-  // and its retry are part of the same conversation as the request that
-  // triggered them, so they carry the same key the original attempt used.
-  const conversationKey = conversationKeyOf(raw)
   // The upstream reports the overrun but not the window size, so the budget has
   // to be derived from evidence rather than from the catalog alone.
   const overrunTokens = estimateMessagesTokens(messages)
@@ -1315,8 +1314,14 @@ async function recoverFromContextOverrun(options: RecoverOptions): Promise<Recov
             const body = client.buildChatBody(
               { ...parsed, stream: true, max_tokens: Math.max(256, Math.floor(budget / 2)) },
               request,
+              region ?? 'cn',
             )
-            return await client.completeChat(summariser.credential, body, signal ?? controller.signal, conversationKey)
+            return await client.completeChat(
+              summariser.credential,
+              body,
+              signal ?? controller.signal,
+              conversationKeyOf(raw),
+            )
           },
         },
         controller.signal,
@@ -1336,14 +1341,19 @@ async function recoverFromContextOverrun(options: RecoverOptions): Promise<Recov
   if (summary === undefined && estimateMessagesTokens(compacted) >= overrunTokens) {
     return { ok: false, detail: compactionDetail === '' ? 'compaction could not reduce the prompt' : compactionDetail }
   }
-  const retryBody = client.buildChatBody(parsed, compacted)
+  const retryBody = client.buildChatBody(parsed, compacted, region ?? 'cn')
   const tried: string[] = []
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (controller.signal.aborted) return { ok: false, detail: 'client disconnected' }
     const account = await pool.acquire(modelId, region)
     if (account === undefined) return { ok: false, detail: 'no account available after compaction' }
     tried.push(account.label)
-    const result = await client.chatStream(account.credential, retryBody, controller.signal, conversationKey)
+    const result = await client.chatStream(
+      account.credential,
+      retryBody,
+      controller.signal,
+      conversationKeyOf(raw),
+    )
     if (!result.ok) {
       // A refusal is filed like any other failed physical call. The success
       // below deliberately is NOT: that one is filed by the forwarder when the

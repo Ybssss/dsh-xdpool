@@ -137,7 +137,18 @@ export interface WorkBuddyAdapter {
   /** Rebuild the adapter's provider snapshot; call after a catalog update. */
   invalidate: () => void
 }
-/** pi-ai input modalities: images only when the catalog advertises them. */
+/**
+ * What `ctx.llm.registerAdapter` hands back: a disposer that also carries
+ * `replace(routes)`.
+ *
+ * `replace` is the only plugin-reachable way to make the host announce
+ * `llm/adapters-updated`. The host emits it from its private `commitRoutes`, so
+ * a plugin that rebuilds its adapter cannot tell the UI directly — it re-commits
+ * the route set through this handle and the host does the announcing. Without
+ * it a live catalog change stays invisible until the app restarts, which is
+ * exactly the "model list is frozen" complaint.
+ */
+export type AdapterHandle = (() => void) & { replace: (providers: string[]) => void }/** pi-ai input modalities: images only when the catalog advertises them. */
 function modelInput(info: WorkBuddyModelInfo): ('text' | 'image')[] {
   return info.supportsImages ? ['text', 'image'] : ['text']
 }
@@ -349,25 +360,46 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
     }
     return catalog.visible().map(info => toPiModel(info, baseUrl, providerId))
   }
-  const base = createProvider({
-    id: providerId,
-    name: displayName,
-    auth: {
-      apiKey: {
-        name: 'XD Pool loopback secret',
-        async resolve({ credential }) {
-          const apiKey = credential?.key
-          return apiKey === undefined || apiKey.length === 0
-            ? undefined
-            : { auth: { apiKey }, source: 'XD Pool' }
+  /**
+   * Build a fresh provider object whose `models` array is the catalog as it
+   * stands right now.
+   *
+   * `createProvider` snapshots the array it is handed, and the host keeps its
+   * own snapshot keyed by the IDENTITY of the `profiles` map
+   * (`dsh-llm-pi-ai/lib/index.js` `PiAiAdapter.current()`: it rebuilds the
+   * model collection only when `this.snapshot.profiles !== profiles`, then
+   * calls `models.setProvider(profile.piProvider)`). Reusing one provider object
+   * across `invalidate()` therefore could not work: the host would recognise the
+   * unchanged profiles map, hand back its cached snapshot, and re-collect the
+   * very same provider — so a model list that changed upstream (a new model
+   * released, an account's entitlements changing) stayed frozen until restart.
+   * That is what users saw on the international gateway. Returning a brand-new
+   * provider from a brand-new profile is the only lever the adapter is given.
+   */
+  const makeProvider = (): Provider => {
+    const base = createProvider({
+      id: providerId,
+      name: displayName,
+      auth: {
+        apiKey: {
+          name: 'XD Pool loopback secret',
+          async resolve({ credential }) {
+            const apiKey = credential?.key
+            return apiKey === undefined || apiKey.length === 0
+              ? undefined
+              : { auth: { apiKey }, source: 'XD Pool' }
+          },
         },
       },
-    },
-    models: buildModels(),
-    api: openAICompletionsApi(),
-  })
-  const provider: Provider = { ...base, getModels: () => buildModels() }
-  const profile: ResolvedPiAiProviderProfile = {
+      models: buildModels(),
+      api: openAICompletionsApi(),
+    })
+    // `getModels` is re-pointed at the live builder so a consumer that holds
+    // this object and asks it directly (rather than going through the host
+    // registry) still sees the current catalog.
+    return { ...base, getModels: () => buildModels() }
+  }
+  const makeProfile = (piProvider: Provider): ResolvedPiAiProviderProfile => ({
     provider: providerId,
     displayName,
     streamIdleTimeoutMs: WORKBUDDY_STREAM_IDLE_TIMEOUT_MS,
@@ -379,8 +411,9 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
     // empty map means "no model is pre-rejected".
     modelErrors: new Map(),
     ...REQUEST_IMAGE_BUDGETS,
-    piProvider: provider,
-  }
+    piProvider,
+  })
+  const profile: ResolvedPiAiProviderProfile = makeProfile(makeProvider())
   // `modelErrors` is declared in the literal above: the pinned dsh-llm-pi-ai
   // (0.1.5-rc.2) publishes it as required, so the cast-based workaround the
   // older pin needed is gone.
@@ -405,7 +438,10 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
     adapter,
     buildModels,
     invalidate: () => {
-      profiles = new Map<string, ResolvedPiAiProviderProfile>([[providerId, profile]])
+      // New map, new profile, new provider — see `makeProvider`. Anything less
+      // leaves the host's cached model collection in place and the picker
+      // unchanged.
+      profiles = new Map<string, ResolvedPiAiProviderProfile>([[providerId, makeProfile(makeProvider())]])
     },
   }
 }

@@ -22,7 +22,7 @@ import type { WorkBuddyAccountPool } from '../src/accounts.ts'
 import type { WorkBuddyUpstreamClient, WorkBuddyRegion } from '../src/upstream.ts'
 import { createWorkBuddyShim } from '../src/shim.ts'
 import { AggregateCatalog } from '../src/aggregate.ts'
-import { buildComboCatalog, comboChain, normalizeCombos, resetComboRotation } from '../src/combos.ts'
+import { buildComboCatalog, comboChain, comboId, normalizeCombos, resetComboRotation } from '../src/combos.ts'
 import type { AggregateStore } from '../src/store.ts'
 const PROVIDER_ID = 'agnes'
 const MODEL_ID = 'agnes-2.0-flash'
@@ -117,7 +117,10 @@ function clientWith(failing: Record<string, { kind: string; status: number; mess
   })
   return {
     client: {
+      // The shim now prepares bodies region-aware; a fake that only answers
+      // `prepareChatBody` would make every pool attempt throw.
       prepareChatBody: (raw: string) => raw,
+      prepareChatBodyFor: (raw: string) => raw,
       chatStream,
     } as unknown as WorkBuddyUpstreamClient,
     chatStream,
@@ -136,7 +139,10 @@ async function withShim<T>(
   await catalog.refresh()
   const shim = createWorkBuddyShim({
     pool: setup.pool ?? poolWith(async () => undefined),
-    client: setup.client ?? ({ prepareChatBody: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient),
+    client: setup.client ?? ({
+      prepareChatBody: (raw: string) => raw,
+      prepareChatBodyFor: (raw: string) => raw,
+    } as unknown as WorkBuddyUpstreamClient),
     catalog: poolCatalog(),
     region: 'cn' as WorkBuddyRegion,
     aggregate: { catalog, readStore: () => setup.store },
@@ -360,6 +366,29 @@ describe('round-robin rotates, fallback does not', () => {
   })
 })
 describe('the chain table survives a save/load round trip', () => {
+  it('keeps a chain whose name is not written in Latin letters', async () => {
+    /*
+      Regression: the id slug was `[^a-z0-9]+` → '-', so a Chinese name became
+      the empty string, `normalizeCombos` dropped the row, and the save reported
+      success while storing nothing — reported as "the new route will not save".
+      A name is user data; the id has to survive any script.
+    */
+    const { saveCombos, readAggregateSettingsSync, combosOf } = await import('../src/store.ts')
+    const home = mkdtempSync(join(tmpdir(), 'xdpool-combos-'))
+    const previous = process.env.DSH_HOME
+    process.env.DSH_HOME = home
+    try {
+      await saveCombos([{ name: '写作回退', models: ['hy3'] }])
+      const stored = combosOf(readAggregateSettingsSync())
+      expect(stored.map(chain => chain.name)).toEqual(['写作回退'])
+      expect(stored[0]?.id).toBe('combo:写作回退')
+      // The ASCII shape must not change: ids already stored keep resolving.
+      expect(comboId('Write Then Fallback')).toBe('combo:write-then-fallback')
+    } finally {
+      if (previous === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previous
+    }
+  })
   it('writes the whole table and reads back what it can serve', async () => {
     const { saveCombos } = await import('../src/store.ts')
     const home = mkdtempSync(join(tmpdir(), 'xdpool-combos-'))

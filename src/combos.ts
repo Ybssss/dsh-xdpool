@@ -112,13 +112,29 @@ function stringList(value: unknown): string[] {
   }
   return out
 }
-/** The combo id a name slugifies to, or '' when the name cannot form one. */
+/**
+ * The combo id a name slugifies to, or '' when the name cannot form one.
+ *
+ * Unicode-aware on purpose. This used to be `/[^a-z0-9]+/g`, which meant any
+ * name that was not ASCII — every Chinese chain name — slugged to the empty
+ * string, and `normalizeCombos` then dropped the entry with a bare `continue`.
+ * The card reported "saved", the store held nothing, and the chain vanished on
+ * the next read: the "new route cannot be saved" report. A name is user data and
+ * may be written in any script, so the id has to survive one.
+ *
+ * Latin names keep the old shape (`writing-fallback`), because ids already
+ * stored that way must keep resolving; only characters that used to be stripped
+ * to nothing are now kept.
+ */
 export function comboId(name: string): string {
   const slug = text(name)
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    // `\p{L}`/`\p{N}` keep letters and digits of every script; everything else
+    // (spaces, punctuation, emoji) becomes the hyphen that separates words.
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
     .slice(0, 48)
+    .replace(/-+$/u, '')
   return slug === '' ? '' : `${COMBO_PREFIX}${slug}`
 }
 /** True when the id names a combo row. */
@@ -143,7 +159,9 @@ export function isComboRow(
  *
  * A chain with no members is DROPPED rather than kept as an empty row: a model
  * that cannot answer anything is not a model, and showing one in the picker
- * only produces a request that fails with nothing to fix.
+ * only produces a request that fails with nothing to fix. The card warns about
+ * that case before the save (`route.noMembers`), which is why dropping here is
+ * not a silent loss.
  */
 export function normalizeCombos(raw: unknown): ComboSetting[] {
   if (!Array.isArray(raw)) return []

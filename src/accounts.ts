@@ -992,8 +992,40 @@ export class WorkBuddyAccountPool {
       }
     }
 
+    // Second index: the account UUID alone.
+    //
+    // The two sign-in routes do not agree on which identity they can prove. A
+    // desktop sign-in writes both `uin` (the numeric billing id) and `uid` (the
+    // account UUID); a scan sign-in through the channel pack only ever learns
+    // the UUID, because the pack records it as `user_id` from the login
+    // response. `workbuddyAccountId` prefers `uin`, so the same person arriving
+    // by the two routes hashed to two different ids and the pool showed one
+    // human twice — with one copy carrying the scan credentials and the other
+    // the desktop ones, each contributing its own share of the model list.
+    //
+    // Rekeying on `uid` was the tempting fix and the wrong one: every cooldown,
+    // dead mark, ignore-list entry and stored snapshot is filed under the
+    // existing id, so changing the hash would retire all of it at once. Merging
+    // onto whichever id is already present keeps that state and makes the later
+    // sighting of the same human collapse into the earlier one instead.
+    const byUid = new Map<string, string>()
+    for (const account of byId.values()) {
+      const uid = account.credential.uid
+      if (typeof uid === 'string' && uid !== '' && !byUid.has(uid)) byUid.set(uid, account.id)
+    }
+
     for (const credential of found) {
-      const id = workbuddyAccountId(credential)
+      const byIdentity = workbuddyAccountId(credential)
+      // Join the row that already holds this UUID, whichever id it is filed
+      // under. Deliberately not conditioned on `uin` being absent: a full
+      // desktop credential arriving second must land on the row the scanned one
+      // already created, or the two orders would produce two different pool
+      // layouts for the same human — and rekeying on every rescan would strand
+      // the cooldowns filed under the first id.
+      const uid = credential.uid
+      const knownId = typeof uid === 'string' && uid !== '' ? byUid.get(uid) : undefined
+      const id = knownId ?? byIdentity
+      if (knownId === undefined && typeof uid === 'string' && uid !== '') byUid.set(uid, id)
       const existing = byId.get(id)
       if (existing === undefined) {
         byId.set(id, {

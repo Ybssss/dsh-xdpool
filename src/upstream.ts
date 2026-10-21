@@ -13,7 +13,7 @@
  */
 
 import type { WorkBuddyCredential } from './accounts.ts'
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { MarketExpert } from './task-events.ts'
 import type { ChatMessage } from './context-budget.ts'
 
@@ -418,171 +418,180 @@ const CHAT_IDENTITY_HEADERS: Readonly<Record<string, string>> = Object.freeze({
 })
 
 /**
- * The conversation-identity headers the gateway verifies on a chat completion.
+ * System-prompt strings the gateway treats as evidence of a non-official
+ * client, and the rewriting that clears the check.
  *
  * WHY THIS EXISTS
  *
- * Around 2026-10-15 the international gateway began verifying, per account,
- * that a `/v2/chat/completions` call looks like it came from the official
- * client. A call arriving without a conversation id is refused before it
- * reaches a model, with the sign-in still perfectly valid:
+ * `code 11128 Illegal API invocation from an unapproved channel` has a SECOND
+ * trigger, separate from the conversation-identity headers below: the gateway
+ * matches the CONTENT of system messages against a list of strings that identify
+ * other agents' clients. The first-party DSH system-prompt plugin injects
+ * `You are an AI agent powered by DeepSeek Harness.` as the opening line of
+ * every conversation, so every request from an unmodified install is rejected —
+ * regardless of which account in the pool is used, which is why the reported
+ * symptom was a 400 on the first account with no retry.
  *
- *   http 400 {"code":11128,"msg":"conversation id missing","requestId":"..."}
+ * Boundary, measured against the live domestic gateway (429 = accepted,
+ * 400/11128 = blocked):
+ *   - the match is a literal substring, BUT only near the START of a system
+ *     message: the sentence blocked a longer prompt when it was the first line,
+ *     and passed when one plain line was prepended to it ("trailing text after
+ *     it" above is the same finding from the other side).
+ *   - it is case-insensitive (`you are an ai agent powered by deepseek harness`
+ *     is blocked too).
+ *   - only `role: "system"` is inspected: the same sentence in a `user` or
+ *     `tool` message passes, and it is blocked in a second system message too.
+ *   - `deepseek harness` alone, or `powered by deepseek` alone, passes — the
+ *     whole phrase is what matches.
+ *   - replacing `powered by` with `running on` passes, which is the rewrite
+ *     below: it keeps the meaning for the model and shares no substring with
+ *     the fingerprint.
  *
- * which the desktop surfaces as "这次调用没通过渠道校验，可能不是官方客户端发出的".
- * This client sent `X-Conversation-ID` only from its automation probe
- * (`openConversation`) and nothing of the sort on the path real user traffic
- * takes, so pooled completions were refused. See issue #46.
+ * A prepended blank line would equally defeat a start-anchored check, but it
+ * would leave the banned string in the body: the list is server-side and may
+ * lose its anchor tomorrow. Rewriting the phrase is what the report's repro
+ * verified, so that is what this does.
  *
- * THE CONTRACT
- *
- * Taken from the official desktop client's own request builder — `Yr(e,t,n)`
- * in its installed `main/daemon-bootstrap.js`, the single place the shipped app
- * assembles a chat-completion request:
- *
- *   X-Conversation-ID          stable for the conversation
- *   X-Conversation-Request-ID  stable for the conversation
- *   acp-connection-id          stable for the conversation
- *   X-Conversation-Message-ID  fresh per request
- *   X-Request-ID               fresh per request
- *   X-Agent-Intent             'craft'
- *   X-Agent-Purpose            'conversation'
- *   x-codebuddy-request        '1'
- *   X-Private-Data             'true'
- *
- * The desktop keeps the stable three in an in-memory session registry and mints
- * them once per conversation; the two per-request ids are fresh `randomUUID()`s
- * on every call.
- *
- * We DERIVE the stable three from the conversation key instead of holding a
- * registry. That key is already the plugin's notion of "one conversation"
- * (`conversationKeyOf` in the shim — what `sticky` routing binds on), so the
- * derivation keeps one definition of a conversation, survives a restart, and
- * unlike a registry gives a conversation the same identity on whichever
- * account it ends up routing through.
- *
- * DELIBERATELY NOT INCLUDED
- *
- * `X-Private-Data` is `'true'` here because that is the value the desktop's chat
- * builder uses; the CLI's `'false'` comes from its `enableModelOptimization`
- * setting, which is a different client's concern.
- *
- * `Zr()`'s tracing headers ARE included, via `chatTracingHeaders()`, after the
- * `request illegal` rejection showed the conversation id alone is not enough.
+ * The list is an ARRAY because these fingerprints are appended to over time; a
+ * future rejection should be one more row here, not a new code path.
  */
-export interface ChatConversationIdentity {
-  /** Stable for the conversation; every call in it presents the same value. */
-  readonly conversationId: string
-  /** Stable for the conversation. */
-  readonly conversationRequestId: string
-  /** Stable for the conversation. */
-  readonly acpConnectionId: string
+const BANNED_SYSTEM_PHRASES: readonly (readonly [RegExp, string])[] = Object.freeze([
+  [/powered by DeepSeek Harness/gi, 'running on DeepSeek Harness'],
+] as const)
+
+/**
+ * Rewrite fingerprinted system content, leaving everything else byte-identical.
+ *
+ * System content arrives as either a plain string or an array of content blocks
+ * (an OpenAI-compatible body allows both), so both shapes are handled — fixing
+ * only the string form would miss every request that carries an image or a
+ * cache-control block.
+ *
+ * Returns the SAME reference when nothing matched: a long conversation's system
+ * prompt can be large, and paying for a deep copy to change nothing is waste.
+ * Only matched `text` blocks are rebuilt; image and cache blocks pass through
+ * untouched so the request shape survives.
+ */
+export function sanitizeSystemContent(content: unknown): unknown {
+  if (typeof content === 'string') return sanitizeSystemText(content)
+  if (!Array.isArray(content)) return content
+  let changed = false
+  const next = content.map((block: unknown) => {
+    if (typeof block !== 'object' || block === null || Array.isArray(block)) return block
+    const record = block as Record<string, unknown>
+    const text = record['text']
+    if (typeof text !== 'string') return block
+    const cleaned = sanitizeSystemText(text)
+    if (cleaned === text) return block
+    changed = true
+    return { ...record, text: cleaned }
+  })
+  return changed ? next : content
 }
 
 /**
- * One sha256-derived id in RFC 4122 version-4 shape.
+ * Apply every banned-phrase rewrite to one string.
  *
- * The desktop mints these with `randomUUID()`, so they are dashed UUIDs. An
- * earlier revision of this fix derived 36 bare hex characters instead, which
- * satisfied "an id was sent" but not "the id is well formed" — the gateway
- * answered `{"code":11128,"msg":"request illegal"}`. Determinism is preserved
- * here by taking 16 digest bytes and stamping them with the v4 version nibble
- * and the RFC 4122 variant bits, so the value is a valid UUID that is still a
- * pure function of the conversation key.
+ * The RegExp is rebuilt per call on purpose: a shared `g`-flagged instance
+ * carries `lastIndex` between calls, so the second request in a conversation
+ * could skip a match the first one caught.
  */
-function deriveConversationUuid(key: string, salt: string): string {
-  const bytes = Buffer.from(createHash('sha256').update(`${salt}:${key}`).digest().subarray(0, 16))
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80
-  const hex = bytes.toString('hex')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+function sanitizeSystemText(text: string): string {
+  let out = text
+  for (const [pattern, replacement] of BANNED_SYSTEM_PHRASES) {
+    out = out.replace(new RegExp(pattern.source, pattern.flags), replacement)
+  }
+  return out
 }
 
 /**
- * The conversation identity for `key`.
+ * The conversation-identity headers the gateway's channel check demands.
  *
- * Deterministic: the same key always maps to the same three ids, which is what
- * lets the stable half of the header contract hold across calls without the
- * client storing per-conversation state.
+ * WHY THIS EXISTS
+ *
+ * `www.workbuddy.ai` turned "channel verification" from a soft check into a
+ * hard one. A `POST /v2/chat/completions` missing ANY of `X-Conversation-ID`,
+ * `X-Conversation-Request-ID` or `X-Conversation-Message-ID` is rejected with
+ * business code 11128 (`msg: "request illegal"` on the international gateway,
+ * `msg: "conversation id missing"` in the earlier wording). Verified by
+ * elimination against real credentials: delete any one of the three and the
+ * call 400s; send all three and it 200s with normal SSE. Every other header the
+ * desktop sends (`acp-connection-id`, `X-Request-ID`, `X-Agent-Intent`,
+ * `X-Private-Data`, the W3C/B3 tracing family) can be dropped without effect,
+ * so only these three are load-bearing.
+ *
+ * The values are NOT validated — plain non-UUID strings pass — so the gateway
+ * is checking for presence and consistency, not for a signature. That lets us
+ * derive them from the conversation instead of registering state with upstream.
+ *
+ * 11128 IS MULTIPLEXED. The domestic gateway returns the same code with
+ * `msg: "Illegal API invocation from an unapproved channel"` for a different
+ * cause entirely: a `developer`-role message. `prepareChatBody()` already
+ * rewrites that role; see its comment. Never branch on the business code alone.
  */
-export function chatConversationIdentityOf(key: string): ChatConversationIdentity {
+const CONVERSATION_STABLE_SALT = 'conversation'
+
+/**
+ * The three stable conversation ids for one logical conversation.
+ *
+ * Stable across every call and every account in a conversation, because the
+ * upstream treats the triple as one session: regenerating them per request
+ * would read as a new conversation on each turn. Derived rather than stored so
+ * the identity survives a restart and needs no registry — the same reasoning
+ * `deriveDeviceId` uses for the device id.
+ *
+ * Falls back to a random seed when the caller has no key (a one-shot compaction
+ * outside any conversation), which is safe because presence is all that is
+ * checked.
+ */
+export function conversationIdentityOf(
+  conversationKey: string | undefined,
+  seed: () => string = randomUUID,
+): { conversationId: string; conversationRequestId: string; acpConnectionId: string } {
+  const base = conversationKey === undefined || conversationKey === ''
+    ? seed()
+    : conversationKey
+  const hash = (suffix: string): string =>
+    createHash('sha256')
+      .update(`${CONVERSATION_STABLE_SALT}:${suffix}:${base}`)
+      .digest('hex')
+  // Shaped like UUIDs so anything downstream that parses them keeps working.
+  const asUuid = (hex: string): string =>
+    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
   return {
-    conversationId: deriveConversationUuid(key, 'conversation'),
-    conversationRequestId: deriveConversationUuid(key, 'conversation-request'),
-    acpConnectionId: deriveConversationUuid(key, 'acp-connection'),
+    conversationId: asUuid(hash('id')),
+    conversationRequestId: asUuid(hash('request')),
+    acpConnectionId: asUuid(hash('acp')),
   }
 }
 
 /**
- * The desktop's `Zr()` tracing companion, emitted on every chat completion.
+ * Full header set for one chat completion.
  *
- * This was originally left out as "correlation plumbing for their observability
- * backend rather than part of the conversation identity". The `request illegal`
- * rejection after the identity headers landed is evidence that the channel check
- * is not satisfied by the conversation id alone, and tracing context is the next
- * class of header the official client always sends and this client never did.
- * `X-Trace-ID` also names the request in the gateway's own error payload, which
- * makes its absence conspicuous on a blocked call.
- *
- * Shapes match the desktop exactly: 16 random bytes as the 32-hex trace id, 8 as
- * the 16-hex span id, and a separate 8 for the B3 parent span.
+ * `chatHeaders()` stays untouched on purpose: it is shared with the
+ * points-automation endpoints, which have never been shown to carry
+ * conversation identity, and adding it there would change how that traffic is
+ * attributed. The per-request ids are fresh UUIDs every call; only the triple
+ * from `conversationIdentityOf` is stable.
  */
-function chatTracingHeaders(): Record<string, string> {
-  const traceId = randomBytes(16).toString('hex')
-  const spanId = randomBytes(8).toString('hex')
-  const parentSpanId = randomBytes(8).toString('hex')
-  return {
-    'traceparent': `00-${traceId}-${spanId}-01`,
-    'b3': `${traceId}-${spanId}-1-${parentSpanId}`,
-    'X-B3-TraceId': traceId,
-    'X-B3-ParentSpanId': parentSpanId,
-    'X-B3-SpanId': spanId,
-    'X-B3-Sampled': '1',
-    'X-Trace-ID': traceId,
-  }
-}
-
-/**
- * The full header set for a chat completion: the shared auth contract, the
- * client identity, and the conversation identity the channel check reads.
- *
- * EVERY chat completion goes through here, which is the point: the rejection
- * this fixes was a path sending a request without a conversation id, so no path
- * may be able to do that again. `craft`/`conversation` are the mode and purpose
- * the desktop reports for an ordinary turn, and they travel with the ids
- * because the same desktop builder emits all of them together.
- *
- * When the pool could not identify the conversation, a one-off identity is
- * minted. The check is that a conversation id was *sent*, not that it matches an
- * earlier call, so an unidentified request is still a legitimate one — refusing
- * to send it would reproduce the very failure this fixes.
- */
-function chatCompletionHeaders(
+export function chatCompletionHeaders(
   credential: WorkBuddyCredential,
   conversationKey?: string,
 ): Record<string, string> {
-  const identity = chatConversationIdentityOf(
-    conversationKey === undefined || conversationKey === '' ? randomUUID() : conversationKey,
-  )
+  const identity = conversationIdentityOf(conversationKey)
   return {
     ...chatHeaders(credential),
     ...CHAT_IDENTITY_HEADERS,
+    'X-Conversation-ID': identity.conversationId,
+    'X-Conversation-Request-ID': identity.conversationRequestId,
+    'acp-connection-id': identity.acpConnectionId,
+    'X-Conversation-Message-ID': randomUUID(),
+    'X-Request-ID': randomUUID(),
     'X-Agent-Intent': 'craft',
     'X-Agent-Purpose': 'conversation',
     'X-Private-Data': 'true',
     'x-codebuddy-request': '1',
-    'X-Conversation-ID': identity.conversationId,
-    'X-Conversation-Request-ID': identity.conversationRequestId,
-    'acp-connection-id': identity.acpConnectionId,
-    // The desktop mints these two afresh on every call; they identify the
-    // request, not the conversation, so they are not derived from the key.
-    'X-Conversation-Message-ID': randomUUID(),
-    'X-Request-ID': randomUUID(),
-    // The desktop sets X-Tenant-Id to the same value as X-Enterprise-Id.
-    ...credential.enterpriseId === undefined || credential.enterpriseId === ''
-      ? {}
-      : { 'X-Tenant-Id': credential.enterpriseId },
-    ...chatTracingHeaders(),
   }
 }
 
@@ -1278,7 +1287,15 @@ export class WorkBuddyUpstreamClient {
    * Normalize an OpenAI chat-completions body for the WorkBuddy upstream:
    * force `stream: true` (the upstream rejects non-streaming), convert the
    * DSH `developer` role into `system` (upstream rejects `developer` with
-   * business code 11128), and flatten `tool_choice` into its string form.
+   * business code 11128), rewrite system content the gateway fingerprints as a
+   * non-official client (also 11128), and flatten `tool_choice` into its string
+   * form.
+   *
+   * This is the REGION-BLIND half. Everything here is measured good on both
+   * gateways, so it runs before the region is known — the pool lane picks its
+   * account after this call. The two region-only rules live in
+   * {@link prepareChatBodyFor} instead; see its comment for why they cannot be
+   * folded in here.
    */
   prepareChatBody(raw: string): string {
     let body: unknown
@@ -1307,6 +1324,11 @@ export class WorkBuddyUpstreamClient {
         if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
         const message = value as Record<string, unknown>
         if (message['role'] === 'developer') message['role'] = 'system'
+        // The gateway scans system CONTENT for other clients' fingerprints;
+        // see BANNED_SYSTEM_PHRASES for the measured boundary.
+        if (message['role'] === 'system') {
+          message['content'] = sanitizeSystemContent(message['content'])
+        }
       }
     }
     const choice = obj['tool_choice']
@@ -1340,6 +1362,63 @@ export class WorkBuddyUpstreamClient {
   }
 
   /**
+   * The region-only half of body normalisation, applied once the account is
+   * known.
+   *
+   * WHY IT IS SEPARATE
+   *
+   * The pool lane calls {@link prepareChatBody} BEFORE it picks an account —
+   * the body has to be ready for whichever account wins. So anything that
+   * depends on the region cannot live there. Two rules do:
+   *
+   * 1. **International requires a leading `system`.** Measured: a body whose
+   *    first message is `user` answers `400 / 11128 "first message is not
+   *    system prompt"` on `www.workbuddy.ai`, while the identical body is
+   *    accepted on the domestic gateway. Same code, different cause — the
+   *    domestic gateway uses 11128 for the `developer` role and for the
+   *    content fingerprint, which is why nothing may branch on the code alone.
+   *    A placeholder assistant prompt is prepended, never merged: every
+   *    caller-supplied message keeps its position and wording.
+   *
+   * 2. **Neither gateway accepts `reasoning_effort: "off"`.** The adapter pins
+   *    `thinkingLevelMap.off` to the literal `'off'` so the level stays
+   *    selectable, and pi-ai emits that value for any request carrying no
+   *    explicit level — so "Default" and "Off" produce the same body.
+   *    Measured: the international GPT family answers `400 / 11133`
+   *    (`extError.param === 'reasoning.effort'`), and the domestic gateway
+   *    rejects it on models that declare `onlyReasoning`. Omission is the only
+   *    spelling measured good everywhere; a literal `'none'` is NOT a safe
+   *    substitute (accepted by the GPT-5.6 family, rejected by others).
+   *
+   * Both rules are no-ops on a body that already complies, so this is safe to
+   * run over an already-prepared body.
+   */
+  prepareChatBodyFor(raw: string, region: WorkBuddyRegion): string {
+    const prepared = this.prepareChatBody(raw)
+    let body: unknown
+    try {
+      body = JSON.parse(prepared)
+    } catch {
+      return prepared
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) return prepared
+    const obj = body as Record<string, unknown>
+    // Rule 2: the adapter's `off` never reaches the wire, on either region.
+    if (obj['reasoning_effort'] === 'off') delete obj['reasoning_effort']
+    // Rule 1: international demands the channel opening with a system turn.
+    if (region === 'global') {
+      const messages = obj['messages']
+      if (Array.isArray(messages)) {
+        const first = messages[0]
+        const leadingSystem = typeof first === 'object' && first !== null && !Array.isArray(first)
+          && (first as Record<string, unknown>)['role'] === 'system'
+        if (!leadingSystem) messages.unshift({ role: 'system', content: 'You are a helpful assistant.' })
+      }
+    }
+    return JSON.stringify(obj)
+  }
+
+  /**
    * Parse a raw OpenAI chat body without normalising it.
    *
    * The compactor needs the message array as objects, while `chatStream` only
@@ -1356,9 +1435,21 @@ export class WorkBuddyUpstreamClient {
     return body as Record<string, unknown>
   }
 
-  /** Re-serialise `base` with a rewritten `messages` array, still normalised. */
-  buildChatBody(base: Record<string, unknown>, messages: readonly ChatMessage[]): string {
-    return this.prepareChatBody(JSON.stringify({ ...base, messages }))
+  /**
+   * Re-serialise `base` with a rewritten `messages` array, still normalised.
+   *
+   * `region` is optional so the composite lanes (aggregate / free) can keep
+   * calling it without one; when supplied, the region-only rules of
+   * {@link prepareChatBodyFor} ride along. Both in-repo callers are the
+   * compaction paths, which always know their shim's region.
+   */
+  buildChatBody(
+    base: Record<string, unknown>,
+    messages: readonly ChatMessage[],
+    region?: WorkBuddyRegion,
+  ): string {
+    const raw = JSON.stringify({ ...base, messages })
+    return region === undefined ? this.prepareChatBody(raw) : this.prepareChatBodyFor(raw, region)
   }
 
   /**
@@ -1368,11 +1459,6 @@ export class WorkBuddyUpstreamClient {
    * endpoint itself always streams, so this reassembles the SSE frames into a
    * single string. Throws on any failure: the compactor then falls back to
    * plain truncation rather than failing the user's turn.
-   *
-   * `conversationKey` identifies the conversation this completion belongs to.
-   * Compaction is part of the same conversation as the request that triggered
-   * it, so the caller passes the same key the retry will use — the gateway
-   * refuses a chat completion that carries no conversation id.
    */
   async completeChat(
     credential: WorkBuddyCredential,
@@ -1394,13 +1480,7 @@ export class WorkBuddyUpstreamClient {
     return await readCompletionText(response.body)
   }
 
-  /**
-   * Forward one chat completion. Never throws for upstream failures.
-   *
-   * `conversationKey` is the pool's stable id for this conversation
-   * (`conversationKeyOf` in the shim); it is optional so a caller without one
-   * still sends a well-formed conversation identity rather than none at all.
-   */
+  /** Forward one chat completion. Never throws for upstream failures. */
   async chatStream(
     credential: WorkBuddyCredential,
     prepared: string,

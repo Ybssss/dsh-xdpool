@@ -106,7 +106,7 @@ describe('the aggregate lane splits traffic by model id', () => {
     const acquire = vi.fn(async () => undefined)
     const shim = createWorkBuddyShim({
       pool: poolWith(acquire),
-      client: { prepareChatBody } as unknown as WorkBuddyUpstreamClient,
+      client: { prepareChatBody, prepareChatBodyFor: prepareChatBody } as unknown as WorkBuddyUpstreamClient,
       catalog: poolCatalog(),
       region: 'cn' as WorkBuddyRegion,
       aggregate: { catalog, readStore: () => store },
@@ -142,7 +142,7 @@ describe('the aggregate lane splits traffic by model id', () => {
     await empty.refresh()
     const shim = createWorkBuddyShim({
       pool: poolWith(async () => undefined),
-      client: { prepareChatBody: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient,
+      client: { prepareChatBody: (raw: string) => raw, prepareChatBodyFor: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient,
       catalog: poolCatalog(),
       region: 'cn' as WorkBuddyRegion,
       aggregate: { catalog: empty, readStore: () => store },
@@ -174,7 +174,7 @@ describe('the aggregate lane splits traffic by model id', () => {
     const acquire = vi.fn(async () => undefined)
     const shim = createWorkBuddyShim({
       pool: poolWith(acquire),
-      client: { prepareChatBody } as unknown as WorkBuddyUpstreamClient,
+      client: { prepareChatBody, prepareChatBodyFor: prepareChatBody } as unknown as WorkBuddyUpstreamClient,
       catalog: poolCatalog(),
       region: 'cn' as WorkBuddyRegion,
       aggregate: { catalog, readStore: () => store },
@@ -206,7 +206,7 @@ describe('the aggregate lane splits traffic by model id', () => {
     const acquire = vi.fn(async () => undefined)
     const shim = createWorkBuddyShim({
       pool: poolWith(acquire),
-      client: { prepareChatBody: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient,
+      client: { prepareChatBody: (raw: string) => raw, prepareChatBodyFor: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient,
       catalog: poolCatalog(),
       region: 'cn' as WorkBuddyRegion,
       aggregate: { catalog, readStore: () => store },
@@ -242,7 +242,7 @@ describe('the aggregate catalog lists both lanes', () => {
     await catalog.refresh()
     const shim = createWorkBuddyShim({
       pool: poolWith(async () => undefined),
-      client: { prepareChatBody: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient,
+      client: { prepareChatBody: (raw: string) => raw, prepareChatBodyFor: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient,
       catalog: poolCatalog(),
       region: 'cn' as WorkBuddyRegion,
       aggregate: { catalog, readStore: () => store },
@@ -334,7 +334,7 @@ describe('a shim built without the aggregate lane serves no third party at all',
     const acquire = vi.fn(async () => undefined)
     const shim = createWorkBuddyShim({
       pool: poolWith(acquire),
-      client: { prepareChatBody: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient,
+      client: { prepareChatBody: (raw: string) => raw, prepareChatBodyFor: (raw: string) => raw } as unknown as WorkBuddyUpstreamClient,
       catalog: poolCatalog(),
       region: 'cn' as WorkBuddyRegion,
     })

@@ -435,8 +435,15 @@ export function ChannelPoolSection({ t }: { readonly t?: Translate | undefined }
           ? model
           : {
             ...model,
+            /*
+              Clearing the cap restores the native window as the ACTIVE one and
+              keeps `nativeContextWindow` in place. Dropping the native figure
+              too would make the row stop looking cappable mid-click, and the
+              radio pair would disappear from under the pointer — the same
+              "it cancels itself" symptom from the other side.
+            */
             ...budget === undefined
-              ? { contextBudget: undefined, nativeContextWindow: undefined }
+              ? { contextBudget: undefined, contextWindow: model.nativeContextWindow ?? model.contextWindow }
               : { contextBudget: budget, contextWindow: budget, nativeContextWindow: model.nativeContextWindow ?? model.contextWindow },
           }),
       }))
@@ -897,7 +904,20 @@ export function ChannelPoolSection({ t }: { readonly t?: Translate | undefined }
                         */
                         const native = model.nativeContextWindow ?? model.contextWindow
                         const capped = native !== undefined && native > CONTEXT_BUDGET_DEFAULT
-                        const budget = model.contextBudget ?? (capped ? CONTEXT_BUDGET_DEFAULT : native)
+                        /*
+                          The APPLIED budget, not the default one.
+
+                          This used to fall back to CONTEXT_BUDGET_DEFAULT
+                          whenever the model was merely *eligible* to be capped,
+                          which made the radio claim a cap that had never been
+                          saved — and worse, made the pair unclickable in one
+                          direction: choosing "full" clears the stored budget,
+                          after which the fallback computed the capped value
+                          again and the selection snapped straight back to the
+                          first radio. No stored budget means the native window
+                          is what actually applies, so that is what to show.
+                        */
+                        const budget = model.contextBudget ?? native
                         return (
                           <li key={model.id} className="dsm-xdpool-cpool-modelrow" data-off={!on}>
                             <label className="dsm-xdpool-cpool-modelrow-toggle">

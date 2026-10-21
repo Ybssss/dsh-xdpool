@@ -68,9 +68,21 @@ export interface PackCredentialDocument {
   domain?: unknown
 }
 
-/** The slice of the pack's pool this module reads. Duck-typed on purpose. */
+/**
+ * The slice of the pack's pool this module reads. Duck-typed on purpose.
+ *
+ * `listAllAccounts` is declared as returning a promise because the pack declares
+ * it `async` (`async listAllAccounts() { return this.readAccounts() }` in
+ * `vendor/channel-pack/pack.js`). It was typed synchronously here on the
+ * assumption that the pack's async wrapper resolved to a plain array — but an
+ * `async` function always hands back a promise, so `pool.listAllAccounts()
+ * .filter(...)` threw `TypeError: ... .filter is not a function` on the very
+ * first read. Nothing caught it at the call site beyond a swallowed rejection,
+ * so every scanned-in channel account silently failed to merge and the account
+ * pool looked empty no matter how many channels the user signed into.
+ */
 export interface PackAccountReader {
-  listAllAccounts(): readonly PackAccountEntry[]
+  listAllAccounts(): Promise<readonly PackAccountEntry[]>
   resolveCredentialByRef(refName: string): Promise<unknown> | unknown
 }
 
@@ -161,7 +173,7 @@ export function readPackAccountPool(ctx: unknown): PackAccountReader | undefined
  */
 export async function readPackCredentials(pool: PackAccountReader | undefined): Promise<WorkBuddyCredential[]> {
   if (pool === undefined) return []
-  const entries = pool.listAllAccounts().filter(entry => {
+  const entries = (await pool.listAllAccounts()).filter(entry => {
     const provider = text(entry.provider)
     return provider !== undefined && PACK_REGION_CHANNELS.includes(provider)
   })

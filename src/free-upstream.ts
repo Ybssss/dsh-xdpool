@@ -731,6 +731,36 @@ export interface FreeTurnHooks {
 }
 
 /**
+ * Add the one fact a 429 on this lane can never convey on its own.
+ *
+ * The free tier meters quota PER UPSTREAM SESSION, not per key and not per
+ * account — the gateway's own sentence is "the provider asked to wait 74558s",
+ * i.e. twenty hours, which reads like a ban on the whole provider. It is not:
+ * a different conversation maps to a different session and is served
+ * immediately. Saying so costs one clause and turns a message that looks like
+ * "this lane is over" into one that tells the user what to do next.
+ *
+ * Only a rate class gets the hint: a dead credential or a missing model has
+ * nothing to do with the session budget, and adding the clause there would
+ * invite the user to retry something that cannot succeed.
+ */
+function withSessionQuotaHint(error: unknown, retryAfterMs: number | undefined): unknown {
+  if (
+    !(error instanceof AggregateError) ||
+    error.kind !== 'soft_rate' ||
+    retryAfterMs === undefined ||
+    error.message.includes('per conversation')
+  ) {
+    return error
+  }
+  return new AggregateError(
+    error.kind,
+    `${error.message} — this quota is counted per conversation on the free tier, so a new conversation (or another model) starts with its own budget`,
+    error.status,
+  )
+}
+
+/**
  * POST one streaming turn and hand back chat-shaped deltas.
  *
  * The shape of the ANSWER decides how it is read, never its Content-Type: a front
@@ -794,7 +824,7 @@ export async function postFreeStreamed(
   const retryAfter = retryAfterMs(response)
   if (!response.ok) {
     const refusal = await response.text().catch(() => '')
-    throw classifyUpstream(response.status, refusal, retryAfter, '')
+    throw withSessionQuotaHint(classifyUpstream(response.status, refusal, retryAfter, ''), retryAfter)
   }
   if (response.body === null) throw new AggregateError('server', 'the free lane returned no body', response.status)
 
@@ -835,7 +865,7 @@ export async function postFreeStreamed(
       continue
     }
     if (isRecord(decoded) && (decoded.error !== undefined || decoded.type === 'error')) {
-      throw classifyUpstream(response.status, event, retryAfter, '')
+      throw withSessionQuotaHint(classifyUpstream(response.status, event, retryAfter, ''), retryAfter)
     }
     const translated: FreeEvent = chatChunksFor(wire, decoded, tools)
     for (const delta of translated.frames) hooks.onDelta(delta)
