@@ -113,6 +113,29 @@ describe('chat completions carry the desktop client identity', () => {
       expect(seen[0].headers['X-Agent-Purpose']).toBe('conversation')
       expect(seen[0].headers['X-Private-Data']).toBe('true')
       expect(seen[0].headers['x-codebuddy-request']).toBe('1')
+      // The stable three are UUID-shaped, exactly as the desktop mints them.
+      const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      expect(seen[0].headers['X-Conversation-ID']).toMatch(uuidV4)
+      expect(seen[0].headers['X-Conversation-Request-ID']).toMatch(uuidV4)
+      expect(seen[0].headers['acp-connection-id']).toMatch(uuidV4)
+    })
+
+    it(`${path.name} sends the desktop's W3C/B3 tracing context`, async () => {
+      // `Zr()` in the desktop's daemon sends this alongside the ids. Its absence
+      // was the remaining difference when the gateway answered "request illegal".
+      const { seen, options } = recordingFetch()
+      const client = new WorkBuddyUpstreamClient(options)
+      await path.run(client)
+      const h = seen[0].headers
+      expect(h['traceparent']).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/)
+      expect(h['b3']).toMatch(/^[0-9a-f]{32}-[0-9a-f]{16}-1-[0-9a-f]{16}$/)
+      expect(h['X-B3-TraceId']).toMatch(/^[0-9a-f]{32}$/)
+      expect(h['X-B3-SpanId']).toMatch(/^[0-9a-f]{16}$/)
+      expect(h['X-B3-ParentSpanId']).toMatch(/^[0-9a-f]{16}$/)
+      expect(h['X-B3-Sampled']).toBe('1')
+      // X-Trace-ID repeats the traceparent trace id, as the desktop does.
+      expect(h['X-Trace-ID']).toBe(h['X-B3-TraceId'])
+      expect(h['traceparent']).toContain(h['X-B3-TraceId']!)
     })
 
     it(`${path.name} keeps the stable session ids stable within one conversation`, async () => {
@@ -155,12 +178,22 @@ describe('chatConversationIdentityOf', () => {
     expect(a.acpConnectionId).not.toBe(b.acpConnectionId)
   })
 
-  it("produces ids shaped like the desktop's device ids (36 hex chars)", () => {
+  it("produces ids shaped like the desktop's UUIDs", () => {
+    // The desktop mints these with `randomUUID()`, so they are dashed UUIDs, not
+    // bare hex. An earlier revision emitted 36 hex characters; the gateway
+    // answered "request illegal" (11128), so the shape is pinned here.
+    const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     const id = chatConversationIdentityOf('k1')
-    expect(id.conversationId).toHaveLength(36)
-    expect(id.conversationId).toMatch(/^[0-9a-f]{36}$/)
-    expect(id.conversationRequestId).toHaveLength(36)
-    expect(id.acpConnectionId).toHaveLength(36)
+    expect(id.conversationId).toMatch(uuidV4)
+    expect(id.conversationRequestId).toMatch(uuidV4)
+    expect(id.acpConnectionId).toMatch(uuidV4)
+  })
+
+  it('distinguishes the three ids of one conversation', () => {
+    // Salted differently, so a conversation does not present the same value in
+    // three headers the desktop populates independently.
+    const id = chatConversationIdentityOf('k1')
+    expect(new Set([id.conversationId, id.conversationRequestId, id.acpConnectionId]).size).toBe(3)
   })
 })
 

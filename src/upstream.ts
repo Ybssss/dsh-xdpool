@@ -13,7 +13,7 @@
  */
 
 import type { WorkBuddyCredential } from './accounts.ts'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { MarketExpert } from './task-events.ts'
 import type { ChatMessage } from './context-budget.ts'
 
@@ -463,12 +463,12 @@ const CHAT_IDENTITY_HEADERS: Readonly<Record<string, string>> = Object.freeze({
  *
  * DELIBERATELY NOT INCLUDED
  *
- * `Zr()`, the desktop's W3C/B3 tracing companion, is not replicated: it is
- * correlation plumbing for their observability backend rather than part of the
- * conversation identity a channel check reads, and nothing else in this client
- * emits trace context. `X-Private-Data` is `'true'` here because that is the
- * value the desktop's chat builder uses; the CLI's `'false'` comes from its
- * `enableModelOptimization` setting, which is a different client's concern.
+ * `X-Private-Data` is `'true'` here because that is the value the desktop's chat
+ * builder uses; the CLI's `'false'` comes from its `enableModelOptimization`
+ * setting, which is a different client's concern.
+ *
+ * `Zr()`'s tracing headers ARE included, via `chatTracingHeaders()`, after the
+ * `request illegal` rejection showed the conversation id alone is not enough.
  */
 export interface ChatConversationIdentity {
   /** Stable for the conversation; every call in it presents the same value. */
@@ -479,9 +479,23 @@ export interface ChatConversationIdentity {
   readonly acpConnectionId: string
 }
 
-/** One sha256-derived id, shaped like `deriveDeviceId`'s output. */
-function deriveSessionId(key: string, salt: string): string {
-  return createHash('sha256').update(`${salt}:${key}`).digest('hex').slice(0, 36)
+/**
+ * One sha256-derived id in RFC 4122 version-4 shape.
+ *
+ * The desktop mints these with `randomUUID()`, so they are dashed UUIDs. An
+ * earlier revision of this fix derived 36 bare hex characters instead, which
+ * satisfied "an id was sent" but not "the id is well formed" — the gateway
+ * answered `{"code":11128,"msg":"request illegal"}`. Determinism is preserved
+ * here by taking 16 digest bytes and stamping them with the v4 version nibble
+ * and the RFC 4122 variant bits, so the value is a valid UUID that is still a
+ * pure function of the conversation key.
+ */
+function deriveConversationUuid(key: string, salt: string): string {
+  const bytes = Buffer.from(createHash('sha256').update(`${salt}:${key}`).digest().subarray(0, 16))
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 /**
@@ -493,9 +507,38 @@ function deriveSessionId(key: string, salt: string): string {
  */
 export function chatConversationIdentityOf(key: string): ChatConversationIdentity {
   return {
-    conversationId: deriveSessionId(key, 'conversation'),
-    conversationRequestId: deriveSessionId(key, 'conversation-request'),
-    acpConnectionId: deriveSessionId(key, 'acp-connection'),
+    conversationId: deriveConversationUuid(key, 'conversation'),
+    conversationRequestId: deriveConversationUuid(key, 'conversation-request'),
+    acpConnectionId: deriveConversationUuid(key, 'acp-connection'),
+  }
+}
+
+/**
+ * The desktop's `Zr()` tracing companion, emitted on every chat completion.
+ *
+ * This was originally left out as "correlation plumbing for their observability
+ * backend rather than part of the conversation identity". The `request illegal`
+ * rejection after the identity headers landed is evidence that the channel check
+ * is not satisfied by the conversation id alone, and tracing context is the next
+ * class of header the official client always sends and this client never did.
+ * `X-Trace-ID` also names the request in the gateway's own error payload, which
+ * makes its absence conspicuous on a blocked call.
+ *
+ * Shapes match the desktop exactly: 16 random bytes as the 32-hex trace id, 8 as
+ * the 16-hex span id, and a separate 8 for the B3 parent span.
+ */
+function chatTracingHeaders(): Record<string, string> {
+  const traceId = randomBytes(16).toString('hex')
+  const spanId = randomBytes(8).toString('hex')
+  const parentSpanId = randomBytes(8).toString('hex')
+  return {
+    'traceparent': `00-${traceId}-${spanId}-01`,
+    'b3': `${traceId}-${spanId}-1-${parentSpanId}`,
+    'X-B3-TraceId': traceId,
+    'X-B3-ParentSpanId': parentSpanId,
+    'X-B3-SpanId': spanId,
+    'X-B3-Sampled': '1',
+    'X-Trace-ID': traceId,
   }
 }
 
@@ -535,6 +578,11 @@ function chatCompletionHeaders(
     // request, not the conversation, so they are not derived from the key.
     'X-Conversation-Message-ID': randomUUID(),
     'X-Request-ID': randomUUID(),
+    // The desktop sets X-Tenant-Id to the same value as X-Enterprise-Id.
+    ...credential.enterpriseId === undefined || credential.enterpriseId === ''
+      ? {}
+      : { 'X-Tenant-Id': credential.enterpriseId },
+    ...chatTracingHeaders(),
   }
 }
 
