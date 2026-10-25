@@ -136,20 +136,93 @@ interface ToolResult {
   content: Record<string, unknown>[]
 }
 
-/** Every tool result a message carries, in order. */
-function toolResultsOf(message: Record<string, unknown>): ToolResult[] {
-  if (message.role !== 'tool') {
-    const blocks = blocksOf(message.content).filter(block => block.type === 'tool-result')
-    if (blocks.length === 0) return []
-    const callId = text(message.tool_call_id ?? message.toolCallId ?? message.id)
-    return [{ callId, content: blocks }]
-  }
-  const out: ToolResult[] = []
-  const blocks = blocksOf(message.content).filter(block => block.type === 'tool-result')
+/**
+ * Is this block a tool-result carrier?
+ *
+ * Both spellings are accepted: the harness writes `tool-result` (hyphen) while
+ * Anthropic's own wire writes `tool_result` (underscore), and a body that has
+ * already crossed a translation boundary can carry either.
+ */
+function isToolResultBlock(block: Record<string, unknown>): boolean {
+  const type = text(block.type)
+  return type === 'tool-result' || type === 'tool_result'
+}
+
+/**
+ * The text one tool-result block carries.
+ *
+ * The payload sits under a different key per spelling: a harness block puts it
+ * in `content` (a string, or a block list), while an already-flattened OpenAI
+ * part puts it in `text`. Reading only `text` — which is all `textOf` does —
+ * silently blanks every `tool-result`-shaped result, and the turn then reaches
+ * the wire as "(no output)" even though the filter matched.
+ */
+function toolResultTextOf(block: Record<string, unknown>): string {
+  const direct = text(block.text)
+  if (direct !== '') return direct
+  const nested = block.content
+  if (typeof nested === 'string') return nested
+  if (Array.isArray(nested)) return textOf(nested)
+  return ''
+}
+
+/**
+ * The text of a tool result's blocks, reading every spelling.
+ *
+ * `textOf` is not usable here: it only understands `{type:'text'}`, so it drops
+ * the payload of a `tool-result` block. This keeps plain text blocks working
+ * while also unwrapping the result-shaped ones.
+ */
+function resultTextOf(blocks: readonly Record<string, unknown>[]): string {
+  let out = ''
   for (const block of blocks) {
-    out.push({ callId: text(block.tool_use_id ?? block.toolCallId ?? message.tool_call_id ?? message.id), content: [block] })
+    if (isToolResultBlock(block)) {
+      out += toolResultTextOf(block)
+      continue
+    }
+    if (block.type === 'text' && typeof block.text === 'string') out += block.text
   }
   return out
+}
+
+/**
+ * Every tool result a message carries, in order.
+ *
+ * A `role: "tool"` message arrives in one of three shapes, and all three must be
+ * recognised or the output is lost without a warning:
+ *
+ *   1. OpenAI string — `content` is a plain string. This is what callers send,
+ *      and it was the failing case: `blocksOf` turns it into one `text` block,
+ *      which the old `type === 'tool-result'` filter discarded, so nothing was
+ *      emitted and both translators' `continue` then dropped the message.
+ *   2. OpenAI content-parts — `content` is `[{type:'text', text}]`.
+ *   3. Anthropic/harness blocks — `content` is `[{type:'tool-result', …}]`.
+ *
+ * The `continue` statements in the translators are correct and stay: they fire
+ * because this function has ALREADY emitted the result as a
+ * `function_call_output` / `tool_result` item. The bug was that this function
+ * emitted nothing for shapes 1 and 2, and blank text for shape 3.
+ */
+function toolResultsOf(message: Record<string, unknown>): ToolResult[] {
+  const blocks = blocksOf(message.content)
+  const results = blocks.filter(isToolResultBlock)
+  if (message.role !== 'tool') {
+    if (results.length === 0) return []
+    const callId = text(message.tool_call_id ?? message.toolCallId ?? message.id)
+    return [{ callId, content: results }]
+  }
+  const out: ToolResult[] = []
+  for (const block of results) {
+    out.push({ callId: text(block.tool_use_id ?? block.toolCallId ?? message.tool_call_id ?? message.id), content: [block] })
+  }
+  if (out.length > 0) return out
+  // Shapes 1 and 2: the message's whole content IS the result. Emit it even when
+  // it is empty — a dropped result orphans the assistant's `tool_call`, and the
+  // OpenAI responses wire rejects a `function_call` with no matching output.
+  // An empty result is rendered as "(no output)" by the caller, which is honest;
+  // silence is not.
+  const callId = text(message.tool_call_id ?? message.toolCallId ?? message.id)
+  return [{ callId, content: blocks }]
 }
 
 /** The tool call a message's `tool_calls` array holds, when it holds one. */
@@ -287,7 +360,7 @@ function responsesInput(
         const url = imageUrlOf(block, resolveImage, warnings)
         if (url !== undefined) images.push({ type: 'input_image', image_url: url })
       }
-      const body = textOf(result.content)
+      const body = resultTextOf(result.content)
       out.push({
         type: 'function_call_output',
         call_id: result.callId,
@@ -359,7 +432,7 @@ function claudeTurns(
         const url = imageUrlOf(block, resolveImage, warnings)
         if (url !== undefined) content.push(claudeImage(url))
       }
-      const body = textOf(result.content)
+      const body = resultTextOf(result.content)
       turns.push({
         role: 'user',
         content: [
