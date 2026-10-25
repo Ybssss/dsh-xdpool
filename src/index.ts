@@ -979,6 +979,88 @@ function canonicalJson(value: unknown): string {
   }
   return JSON.stringify(value)
 }
+
+/**
+ * Display labels for the thinking levels the plugin can advertise.
+ *
+ * The host renders `ModelReasoningEffort.name` verbatim in the picker, so these
+ * are prose, not ids. Keyed by the same ids {@link EFFORT_ORDER} sorts, which in
+ * turn must stay in sync with `thinkingLevelMap` in `adapter.ts` — that map is
+ * what decides whether a level is forwarded as `reasoning_effort` or dropped.
+ */
+const EFFORT_LABEL: Readonly<Record<string, string>> = Object.freeze({
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+})
+
+/** Canonical picker order; a level not listed here sorts last. */
+const EFFORT_ORDER: readonly string[] = Object.freeze([
+  'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+])
+
+/**
+ * The free lane publishes a boolean `reasoning` flag and nothing else — no
+ * ladder, no default, no per-model levels. Advertising all six host levels would
+ * promise levels the upstream has never been shown to answer, so this stays
+ * deliberately narrow: the three the ladder is known to accept on every lane.
+ */
+const FREE_LANE_EFFORTS: readonly string[] = Object.freeze(['low', 'medium', 'high'])
+
+/**
+ * Build the `reasoning` half of one model-discovery row.
+ *
+ * Returns `{}` — never `{ reasoning: undefined }` and never
+ * `{ reasoning: { efforts: [] } }` — when nothing can be declared. An empty
+ * `efforts` array is worse than no field at all: the host validates a requested
+ * effort with `efforts.some(...)`, so `[]` rejects every level, while omitting
+ * the field makes the host report the model as non-reasoning instead. Both are
+ * failures, but only one of them is honest about why.
+ *
+ * `defaultEffort` is never emitted: the plugin does not choose a level on the
+ * user's behalf, and a default the upstream silently clamps would make the
+ * picker lie about what is running.
+ */
+function discoveryReasoning(
+  efforts: readonly string[] | undefined,
+): { reasoning: { efforts: readonly { id: string, name: string }[] } } | Record<string, never> {
+  if (efforts === undefined || efforts.length === 0) return {}
+  const seen = new Set<string>()
+  const ordered = [...efforts]
+    .filter(effort => {
+      if (typeof effort !== 'string' || effort === '' || seen.has(effort)) return false
+      seen.add(effort)
+      return true
+    })
+    .sort((left, right) => {
+      const li = EFFORT_ORDER.indexOf(left)
+      const ri = EFFORT_ORDER.indexOf(right)
+      return (li < 0 ? EFFORT_ORDER.length : li) - (ri < 0 ? EFFORT_ORDER.length : ri)
+    })
+  if (ordered.length === 0) return {}
+  return {
+    reasoning: {
+      efforts: ordered.map(id => ({ id, name: EFFORT_LABEL[id] ?? id })),
+    },
+  }
+}
+
+/**
+ * Read the effort ladder off an aggregate (chain) row, if it declares one.
+ *
+ * `ComboModelRow` carries no efforts field today, so this returns `undefined`
+ * for every real row and the chain simply advertises no reasoning. It is written
+ * defensively rather than as a cast so that the day the row grows a ladder, the
+ * picker starts showing it without another edit here.
+ */
+function effortsOfAggregateRow(row: object): readonly string[] | undefined {
+  const raw = (row as { supportedEfforts?: unknown }).supportedEfforts
+  if (!Array.isArray(raw)) return undefined
+  return raw.filter((entry): entry is string => typeof entry === 'string' && entry !== '')
+}
   /**
    * The namespace `settings.update` expects on the running line.
    *
@@ -1907,6 +1989,10 @@ function canonicalJson(value: unknown): string {
               contextWindow: row.contextWindow,
               maxTokens: row.maxOutput,
               inputModalities: row.vision ? ['text', 'image'] : ['text'],
+              // The free roster publishes a boolean `reasoning` flag, not a
+              // ladder, so a reasoning-capable row advertises the narrow
+              // known-good set and a non-reasoning row advertises nothing.
+              ...discoveryReasoning(row.reasoning ? FREE_LANE_EFFORTS : undefined),
             }))
           }
           if (request.provider === XDPOOL_AGGREGATE_PROVIDER) {
@@ -1920,6 +2006,10 @@ function canonicalJson(value: unknown): string {
               contextWindow: row.contextWindow,
               maxTokens: row.maxOutputTokens,
               inputModalities: row.supportsImages ? ['text', 'image'] : ['text'],
+              // A chain has no ladder of its own: its members disagree on levels,
+              // and advertising the union would offer the picker levels that some
+              // member silently clamps. Read defensively so a future field works.
+              ...discoveryReasoning(effortsOfAggregateRow(row)),
             }))
           }
           if (request.provider !== XDPOOL_PROVIDER
@@ -1931,6 +2021,7 @@ function canonicalJson(value: unknown): string {
             contextWindow: model.contextWindow,
             maxTokens: model.maxOutputTokens,
             inputModalities: model.supportsImages ? ['text', 'image'] : ['text'],
+            ...discoveryReasoning(model.supportedEfforts),
           }))
         })
         ctx.logger.info?.(

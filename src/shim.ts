@@ -1452,8 +1452,24 @@ function withBareModelId(raw: string, modelId: string): string {
         await serveSuccessfulStream(res, recovered.account, recovered.result, logger, refreshBalance, pool, usageContext)
         return
       }
-      // The wording is a contract with the Harness; see `contextOverflowMessage`.
-      writeOpenAIError(res, 400, 'context_length_exceeded', contextOverflowMessage(modelId, recovered.detail))
+      // Only the branch that PROVED the prompt still overruns may claim a context
+      // overflow. Every other recovery failure is an upstream fault wearing this
+      // path's clothes, and reporting it as `context_length_exceeded` sends the
+      // host and the user chasing a window that is not the problem — which is
+      // exactly how a channel-verification rejection (400/11128) was misread as a
+      // context overflow, and why a budget was wrongly narrowed to fix it.
+      if (recovered.detail === 'prompt still exceeded the window after compaction') {
+        // The wording is a contract with the Harness; see `contextOverflowMessage`.
+        writeOpenAIError(res, 400, 'context_length_exceeded', contextOverflowMessage(modelId, recovered.detail))
+        return
+      }
+      writeOpenAIError(
+        res,
+        502,
+        'upstream_error',
+        `the compacted retry failed: ${recovered.detail}. This is not a context-length problem; `
+          + 'the conversation was already reduced to fit. Retry, or switch account/model if it persists.',
+      )
       return
     }
     writeOpenAIError(
