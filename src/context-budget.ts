@@ -160,20 +160,37 @@ export function compactMessages(
 
   // Always keep the tail; everything older is a drop candidate.
   const keep = Math.min(keepRecent, body.length)
-  const tail = body.slice(body.length - keep)
+  // A fixed-COUNT tail lands inside a tool group whenever the count is not a
+  // multiple of the group size, which for a real agent loop (user + assistant
+  // with `tool_calls` + results) is almost always. The seam then leaves results
+  // in the tail whose call stayed behind in the head, and the gateway answers
+  //   11148 "tool calls and tool results do not match".
+  //
+  // Walk the seam BACKWARD to the assistant message that owns the group, so the
+  // tail carries the call together with all of its results. Walking forward
+  // instead would strip results from a call that remains in the head — the
+  // mirror image of the same rejection.
+  let seam = body.length - keep
+  while (seam > 0 && body[seam]?.['role'] === 'tool') seam -= 1
+  const tail = body.slice(seam)
   // `head` is the SURVIVING prefix; `dropCount` walks it down from the front, so
   // the dropped set grows while the survivor shrinks. Tracking the dropped set as
   // the survivor list was the original bug: once the prefix emptied, this function
   // reported `changed: false` even though most of the conversation had been cut.
-  const head = body.slice(0, body.length - keep)
+  const head = body.slice(0, seam)
   let dropCount = 0
   let candidate = [...pinned, ...head, ...tail]
   let total = estimateMessagesTokens(candidate)
 
   while (total > options.budget && dropCount < head.length) {
     dropCount += 1
-    candidate = [...pinned, ...head.slice(dropCount), ...tail]
+    // The head is trimmed from the front as well, so this cut needs the same
+    // group alignment as the seam: without it the surviving head can open on a
+    // result whose call was just dropped.
+    const survivor = alignCut(head, dropCount)
+    candidate = [...pinned, ...head.slice(survivor), ...tail]
     total = estimateMessagesTokens(candidate)
+    if (survivor > dropCount) dropCount = survivor
   }
 
   // Summarisation input is exactly the prefix trimmed away.
@@ -188,26 +205,38 @@ export function compactMessages(
 }
 
 /**
- * Advance a front-cut to a boundary an OpenAI-compatible gateway will accept.
+ * Advance a cut to the next boundary a gateway will accept.
  *
- * Slicing a message list from the front by count alone can produce a body that
- * is structurally invalid, in two ways:
+ * A tool group is an assistant message carrying `tool_calls` plus every `tool`
+ * message that answers it. Slicing a list by COUNT can land inside one, which
+ * leaves a `role: "tool"` message whose parent call was cut away (or the mirror
+ * image: a call whose answers were cut away). The gateway answers either with
  *
- *   1. The window begins with a `role: "tool"` message whose parent assistant
- *      message (the one carrying `tool_calls`) was cut away. The gateway rejects
- *      an answer to a call it never saw.
- *   2. The window begins with an assistant message whose `tool_calls` are only
- *      answered by tool messages that were cut away — the mirror image, and
- *      equally rejected.
+ *   11148 "tool calls and tool results do not match"
  *
- * Moving the cut forward past a leading tool message is the fix: the pairing is
- * either restored or the whole orphaned group leaves together. The newest
- * message is never dropped, so a pathological list still terminates.
+ * so the cut has to snap to a group boundary rather than to an index. Advancing
+ * past a leading tool message is sufficient for BOTH directions: a surviving
+ * call with no answers is only possible if its answers were dropped, and they
+ * can only be dropped from the front, which is exactly the run skipped here.
+ *
+ * This is needed in two places that used to be one: the head/tail seam inside
+ * `compactMessages` (a fixed-count tail always splits a three-message group) and
+ * the front cut of `hardTruncate`. Fixing only the front left the seam broken,
+ * which is what the 11148 reported.
  */
-function alignFrontCut(messages: readonly ChatMessage[], start: number): number {
-  let cut = start
-  // A leading tool message has lost its parent: skip the whole run of them.
+function alignCut(messages: readonly ChatMessage[], start: number): number {
+  let cut = Math.max(0, Math.min(start, messages.length))
   while (cut < messages.length - 1 && messages[cut]?.['role'] === 'tool') cut += 1
+  // The "newest message always survives" floor can itself be a tool result whose
+  // call was just dropped — the exact 11148 the alignment exists to prevent. When
+  // the tail run is nothing but orphaned results, walk BACK to the assistant
+  // message that owns them instead of keeping a bare answer. An unsatisfiable
+  // budget then yields a tiny but VALID body rather than a rejected one.
+  if (cut === messages.length - 1 && messages[cut]?.['role'] === 'tool') {
+    let back = cut
+    while (back > 0 && messages[back]?.['role'] === 'tool') back -= 1
+    cut = back
+  }
   return cut
 }
 
@@ -218,7 +247,7 @@ function alignFrontCut(messages: readonly ChatMessage[], start: number): number 
  * single enormous pasted document). The newest message always survives.
  *
  * The cut is aligned to a tool-pairing boundary so the result is always a body
- * the gateway accepts; see {@link alignFrontCut}.
+ * the gateway accepts; see {@link alignCut}.
  */
 export function hardTruncate(
   messages: readonly ChatMessage[],
@@ -230,7 +259,7 @@ export function hardTruncate(
   let total = estimateMessagesTokens(candidate)
   while (total > budget && start < messages.length - 1) {
     start += 1
-    const aligned = alignFrontCut(messages, start)
+    const aligned = alignCut(messages, start)
     candidate = messages.slice(aligned)
     total = estimateMessagesTokens(candidate)
     // Stop advancing the raw cut once alignment alone no longer helps, so the
