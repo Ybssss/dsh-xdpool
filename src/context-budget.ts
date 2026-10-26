@@ -188,10 +188,37 @@ export function compactMessages(
 }
 
 /**
+ * Advance a front-cut to a boundary an OpenAI-compatible gateway will accept.
+ *
+ * Slicing a message list from the front by count alone can produce a body that
+ * is structurally invalid, in two ways:
+ *
+ *   1. The window begins with a `role: "tool"` message whose parent assistant
+ *      message (the one carrying `tool_calls`) was cut away. The gateway rejects
+ *      an answer to a call it never saw.
+ *   2. The window begins with an assistant message whose `tool_calls` are only
+ *      answered by tool messages that were cut away — the mirror image, and
+ *      equally rejected.
+ *
+ * Moving the cut forward past a leading tool message is the fix: the pairing is
+ * either restored or the whole orphaned group leaves together. The newest
+ * message is never dropped, so a pathological list still terminates.
+ */
+function alignFrontCut(messages: readonly ChatMessage[], start: number): number {
+  let cut = start
+  // A leading tool message has lost its parent: skip the whole run of them.
+  while (cut < messages.length - 1 && messages[cut]?.['role'] === 'tool') cut += 1
+  return cut
+}
+
+/**
  * Drop the oldest messages, including pinned ones, as a last resort.
  *
  * Used when even a summary cannot bring the prompt under budget (for example a
  * single enormous pasted document). The newest message always survives.
+ *
+ * The cut is aligned to a tool-pairing boundary so the result is always a body
+ * the gateway accepts; see {@link alignFrontCut}.
  */
 export function hardTruncate(
   messages: readonly ChatMessage[],
@@ -203,14 +230,18 @@ export function hardTruncate(
   let total = estimateMessagesTokens(candidate)
   while (total > budget && start < messages.length - 1) {
     start += 1
-    candidate = messages.slice(start)
+    const aligned = alignFrontCut(messages, start)
+    candidate = messages.slice(aligned)
     total = estimateMessagesTokens(candidate)
+    // Stop advancing the raw cut once alignment alone no longer helps, so the
+    // loop cannot spin: `aligned` only grows, and `start` chases it.
+    if (aligned > start) start = aligned
   }
   return {
     messages: candidate,
-    dropped: messages.slice(0, start),
+    dropped: messages.slice(0, messages.length - candidate.length),
     tokens: total,
-    changed: start > 0,
+    changed: candidate.length < messages.length,
   }
 }
 

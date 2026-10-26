@@ -1837,7 +1837,16 @@ async function recoverFromContextOverrun(options: RecoverOptions): Promise<Recov
       pool.penalize(account.id, parseRateLimitReset(result.message), modelId)
       continue
     }
-    return { ok: false, detail: `upstream ${result.kind} after compaction` }
+    // Carry the upstream's own words. The compacted retry is the one place where
+    // the request body differs from the one that succeeded a moment earlier, so
+    // the reject reason is the only evidence that says WHICH normalisation the
+    // gateway disliked. Dropping it left a bare "client" that named nothing and
+    // cost a full diagnostic round trip.
+    const excerpt = result.message.replace(/\s+/g, ' ').trim().slice(0, 300)
+    return {
+      ok: false,
+      detail: `upstream ${result.kind} after compaction${excerpt === '' ? '' : `: ${excerpt}`}`,
+    }
   }
   return { ok: false, detail: `no account served the compacted request (tried ${tried.length})` }
 }
